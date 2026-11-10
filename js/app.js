@@ -61,7 +61,27 @@
     marketsLoading: null,
     income: null,
     incomeLoading: null,
+    shopper: null,
+    shopperLoading: null,
     gridCache: {},
+    open: {
+      scopeCounty: "taoyuan",
+      scopeDistrict: "",
+      radius: 800,
+      topN: 10,
+      minPop: 1000,
+      minInc: null,
+      wDemand: 5,
+      wComp: 5,
+      wInc: 0,
+      showHeat: true,
+      results: [],
+      scored: [],
+      demandValues: [],
+      compValues: [],
+      incValues: [],
+      ran: false,
+    },
     predict: {
       metric: "age65",
       desc: true,
@@ -315,18 +335,166 @@
   }
 
   function estimatePointIncome(lat, lng, radius) {
+    return incomeWeighted(collectVillageShares(lat, lng, radius).filter((h) => h.v.inc));
+  }
+  function collectVillageShares(lat, lng, radius) {
     const cb = circleBBox(lat, lng, radius);
     const hits = [];
     for (const data of iterCounties()) {
       for (const v of data.villages) {
-        if (!v.inc || !bboxOverlap(v.bbox, cb)) continue;
+        if (!bboxOverlap(v.bbox, cb)) continue;
         const ratio = approxVillageShare(v, lat, lng, radius);
         if (ratio <= 0.002) continue;
         hits.push({ v, ratio });
       }
     }
-    return incomeWeighted(hits);
+    return hits;
   }
+
+  async function ensureShopper() {
+    if (state.shopper) return state.shopper;
+    if (!state.shopperLoading) {
+      state.shopperLoading = loadJSON("data/market_shopper.json").then((d) => {
+        const adults = d.tainanPop.adults20;
+        d.propensity = {};
+        Object.entries(d.tainanPop.groups).forEach(([g, rec]) => {
+          d.propensity[g] = rec.shopShare / (rec.pop / adults);
+        });
+        d.adultShopShareSum = 1 - (d.survey.ageShares.u20 || 0);
+        state.shopper = d;
+        return d;
+      }).catch(() => {
+        state.shopper = null;
+        return null;
+      });
+    }
+    return state.shopperLoading;
+  }
+
+  function shopperMeta() {
+    return state.shopper;
+  }
+
+  function ageBinsFromHits(hits) {
+    const bins = Array(18).fill(0);
+    const fb = Array(18).fill(0);
+    let wpop = 0;
+    for (const h of hits) {
+      const v = h.v;
+      const r = h.ratio;
+      if (!v.pm || !v.pf) continue;
+      for (let i = 0; i < 18; i++) {
+        bins[i] += ((v.pm[i] || 0) + (v.pf[i] || 0)) * r;
+        fb[i] += (v.pf[i] || 0) * r;
+      }
+      wpop += (v.pop || 0) * r;
+    }
+    return { bins, fb, wpop };
+  }
+
+  function scaleBins(src, factor) {
+    return src.map((x) => x * factor);
+  }
+
+  function shopperDemandFromBins(bins, fb) {
+    const meta = shopperMeta();
+    const empty = { demand: null, index: null, adults: 0, groups: {}, pop3059: 0, pop4059: 0, fem3069: 0 };
+    if (!meta || !bins) return empty;
+    const groups = {};
+    let adults = 0;
+    let raw = 0;
+    Object.entries(meta.ageBins).forEach(([g, idxs]) => {
+      const pop = idxs.reduce((s, i) => s + (bins[i] || 0), 0);
+      groups[g] = pop;
+      adults += pop;
+      raw += pop * (meta.propensity[g] || 0);
+    });
+    const div = meta.adultShopShareSum || 1;
+    const demand = raw / div;
+    const index = adults > 0 ? (100 * demand) / adults : null;
+    const pop3059 = (groups["30-39"] || 0) + (groups["40-49"] || 0) + (groups["50-59"] || 0);
+    const pop4059 = (groups["40-49"] || 0) + (groups["50-59"] || 0);
+    let fem3069 = 0;
+    if (fb) {
+      for (const i of [6, 7, 8, 9, 10, 11, 12, 13]) fem3069 += fb[i] || 0;
+    }
+    return { demand, index, adults, groups, pop3059, pop4059, fem3069 };
+  }
+
+  function attachShopperStats(stats, hits) {
+    const { bins, fb } = ageBinsFromHits(hits || []);
+    const d = shopperDemandFromBins(bins, fb);
+    stats.shopDemand = d.demand;
+    stats.shopIndex = d.index;
+    stats.shopAdults = d.adults;
+    stats.shopGroups = d.groups;
+    stats.pop3059 = d.pop3059;
+    stats.pop4059 = d.pop4059;
+    stats.fem3069 = d.fem3069;
+    const mk = stats.marketCount || 0;
+    stats.perShopMkt = mk > 0 && d.demand != null ? d.demand / mk : null;
+    stats.perShopMkt1 = d.demand != null ? d.demand / (mk + 1) : null;
+    const scored = scoreAgainstOpenRun(d.demand, stats.perShopMkt1, stats.incMed, stats.radius);
+    stats.shopScore = scored ? scored.score : null;
+    stats.shopScoreParts = scored;
+    return d;
+  }
+
+  function percentRanks(values) {
+    const n = values.length;
+    const ranks = new Array(n).fill(null);
+    if (!n) return ranks;
+    const order = values.map((v, i) => [v, i]).filter((x) => x[0] != null && !Number.isNaN(x[0]));
+    order.sort((a, b) => a[0] - b[0]);
+    const m = order.length;
+    if (!m) return ranks;
+    if (m === 1) {
+      ranks[order[0][1]] = 50;
+      return ranks;
+    }
+    for (let i = 0; i < m;) {
+      let j = i;
+      while (j < m && order[j][0] === order[i][0]) j += 1;
+      const pct = (100 * ((i + j - 1) / 2)) / (m - 1);
+      for (let k = i; k < j; k++) ranks[order[k][1]] = pct;
+      i = j;
+    }
+    return ranks;
+  }
+
+  function percentileOf(value, arr) {
+    if (value == null || !arr || !arr.length) return null;
+    const vals = arr.filter((v) => v != null && !Number.isNaN(v));
+    const n = vals.length;
+    if (!n) return null;
+    if (n === 1) return 50;
+    let less = 0, ties = 0;
+    for (const v of vals) {
+      if (v < value) less += 1;
+      else if (v === value) ties += 1;
+    }
+    return (100 * (less + (ties ? (ties - 1) / 2 : 0))) / (n - 1);
+  }
+
+  function composeScore(pD, pC, pI, wD, wC, wI) {
+    let num = 0, den = 0;
+    if (wD > 0 && pD != null) { num += wD * pD; den += wD; }
+    if (wC > 0 && pC != null) { num += wC * pC; den += wC; }
+    if (wI > 0 && pI != null) { num += wI * pI; den += wI; }
+    if (!den) return null;
+    return { score: num / den, pD, pC, pI, wD, wC, wI };
+  }
+
+  function scoreAgainstOpenRun(demand, perMkt1, incMed, radius) {
+    const run = state.open;
+    if (!run || !run.ran || !run.demandValues) return null;
+    if (radius != null && run.radius !== radius) return null;
+    const pD = percentileOf(demand, run.demandValues);
+    const pC = percentileOf(perMkt1, run.compValues);
+    const pI = incMed == null ? null : percentileOf(incMed, run.incValues);
+    return composeScore(pD, pC, pI, run.wDemand, run.wComp, run.wInc);
+  }
+
 
   function villIncomeNote(v) {
     if (!v || !v.inc || v.inc.med == null) return "所得無資料";
@@ -551,7 +719,7 @@
     const homeName = home ? home.name : countyName(homeId);
     const cInc = countyIncomeOf(homeName) || (avg && avg.incMed != null ? { medW: avg.incMed, avgW: avg.incAvg } : null);
 
-    return {
+    const out = {
       kind: "circle",
       lat, lng, radius, areaKm2, pop, hh, density,
       age, pm, pf,
@@ -572,6 +740,8 @@
       homeCountyName: homeName,
       countyAvg: avg,
     };
+    attachShopperStats(out, hits);
+    return out;
   }
 
   function getDistrict(code) {
@@ -618,7 +788,7 @@
     const dInc = districtIncome(d);
     const homeName = d.county || countyName(d.cid);
     const cInc = countyIncomeOf(homeName) || (avg && avg.incMed != null ? { medW: avg.incMed, avgW: avg.incAvg } : null);
-    return {
+    const out = {
       kind: "district",
       district: d,
       lat: d.center[1],
@@ -650,6 +820,8 @@
       homeCountyName: homeName,
       countyAvg: avg,
     };
+    attachShopperStats(out, out.hits);
+    return out;
   }
 
   async function setCenter(lat, lng, name) {
@@ -669,6 +841,7 @@
       ensureCountiesForCircle(lat, lng, state.radius),
       ensureMarkets(),
       ensureIncome(),
+      ensureShopper(),
     ]);
     if (seq !== centerSeq) return;
     const vill = findPlace(lat, lng);
@@ -934,9 +1107,10 @@
   }
 
   function showPanelForMode() {
-    const predict = state.mode === "predict";
-    $("predictBody").hidden = !predict;
-    if (predict) {
+    const special = state.mode === "predict" || state.mode === "open";
+    $("predictBody").hidden = state.mode !== "predict";
+    if ($("openBody")) $("openBody").hidden = state.mode !== "open";
+    if (special) {
       $("panelEmpty").hidden = true;
       $("panelBody").hidden = true;
     }
@@ -946,18 +1120,22 @@
     $("btnModeCircle").classList.toggle("active", state.mode === "circle");
     $("btnModeAdmin").classList.toggle("active", state.mode === "admin");
     $("btnModePredict").classList.toggle("active", state.mode === "predict");
+    if ($("btnModeOpen")) $("btnModeOpen").classList.toggle("active", state.mode === "open");
   }
 
   function syncOverlay() {
     $("radiusBar").hidden = state.mode !== "circle";
     $("adminBar").hidden = state.mode !== "admin";
     $("restoToggleWrap").hidden = state.mode !== "circle";
-    if ($("marketToggleWrap")) $("marketToggleWrap").hidden = state.mode === "predict";
+    if ($("marketToggleWrap")) $("marketToggleWrap").hidden = state.mode === "predict" || state.mode === "open";
     if (state.mode === "admin") {
       $("mapHint").hidden = true;
     } else if (state.mode === "predict") {
       $("mapHint").hidden = false;
       $("mapHint").textContent = "調整條件後按開始篩選；點結果可查看該點步行圈";
+    } else if (state.mode === "open") {
+      $("mapHint").hidden = false;
+      $("mapHint").textContent = "調整權重與範圍後按開始分析；點結果可查看該點步行圈";
     } else {
       $("mapHint").hidden = false;
       $("mapHint").textContent = "點地圖設定中心，或拖曳橘色圓點";
@@ -1031,6 +1209,13 @@
           ? `最近：${s.nearestMarket.name}　${Math.round(s.nearestMarket.dist)} 公尺`
           : "",
         "wide"),
+      metric("菜市場潛在客群", s.shopDemand == null ? "—" : fmtInt(s.shopDemand),
+        s.shopIndex == null ? "年齡權重來自臺南市市場調查，套用到本地是假設"
+          : `指數 ${fmt1(s.shopIndex)}（100＝與臺南市111年4月成年人口結構相同）。臺南調查權重，套用到本地是假設`),
+      metric("開店評分", s.shopScore == null ? "尚未與網格比較" : fmt1(s.shopScore),
+        s.shopScore == null
+          ? "到「菜市場開店」用相同半徑分析後，即可看到與同批點位比較的評分"
+          : `需求百分位 ${fmt1(s.shopScoreParts.pD)}、低競爭百分位 ${fmt1(s.shopScoreParts.pC)}` + (s.shopScoreParts.wI > 0 && s.shopScoreParts.pI != null ? `、所得百分位 ${fmt1(s.shopScoreParts.pI)}` : "")),
       metric("所得中位數", s.incMed == null ? "—" : fmtWan(s.incMed),
         incomeCompareNote(
           s.incMed, s.countyIncMed, county, "中位數",
@@ -1053,6 +1238,7 @@
     renderAge(s);
     renderBrands(s);
     renderMarkets(s);
+    renderOpenSection(s);
     renderRestaurants();
     showTab(state.tab);
   }
@@ -1201,6 +1387,7 @@
     $("ageSection").hidden = tab !== "age";
     $("brandSection").hidden = tab !== "brand";
     $("marketSection").hidden = tab !== "market";
+    if ($("openSection")) $("openSection").hidden = tab !== "open";
     $("restoSection").hidden = tab !== "resto";
   }
 
@@ -1232,6 +1419,9 @@
       nearestMarket: s.nearestMarket ? `${s.nearestMarket.name} ${Math.round(s.nearestMarket.dist)}m` : "—",
       incMed: s.incMed,
       incAvg: s.incAvg,
+      shopDemand: s.shopDemand,
+      shopIndex: s.shopIndex,
+      shopScore: s.shopScore,
     });
     renderCompare();
     drawCompareMarkers();
@@ -1260,6 +1450,9 @@
       ${row("最近市場", (c) => c.nearestMarket || "—")}
       ${row("所得中位數", (c) => c.incMed == null ? "—" : fmtWan(c.incMed))}
       ${row("所得平均數", (c) => c.incAvg == null ? "—" : fmtWan(c.incAvg))}
+      ${row("菜市場潛在客群", (c) => c.shopDemand == null ? "—" : fmtInt(c.shopDemand))}
+      ${row("潛在客群指數", (c) => c.shopIndex == null ? "—" : fmt1(c.shopIndex))}
+      ${row("開店評分", (c) => c.shopScore == null ? "—" : fmt1(c.shopScore))}
     </tbody>`;
     $("compareTable").querySelectorAll("[data-del]").forEach((b) => {
       b.addEventListener("click", () => {
@@ -1370,7 +1563,7 @@
       fitBBoxes(visibleDistricts());
       showPanelForMode();
       if (state.stats) renderPanel();
-    } else if (mode === "predict") {
+    } else if (mode === "predict" || mode === "open") {
       districtLayer.clearLayers();
       circleLayer.clearLayers();
       villageLayer.clearLayers();
@@ -1379,9 +1572,12 @@
       if (marketLayer) marketLayer.clearLayers();
       if (map.hasLayer(centerMarker)) map.removeLayer(centerMarker);
       syncOverlay();
-      if (state.predict.ran) {
+      if (mode === "predict" && state.predict.ran) {
         drawPredictLayers();
         renderPredictList();
+      } else if (mode === "open" && state.open.ran) {
+        drawOpenLayers();
+        renderOpenList();
       } else {
         heatLayer.clearLayers();
         predictLayer.clearLayers();
@@ -1671,6 +1867,11 @@
     $("predictCounty").innerHTML = `<option value="">全區域</option>` + opts;
     $("predictCounty").value = "taoyuan";
     fillPredictDistricts();
+    if ($("openCounty")) {
+      $("openCounty").innerHTML = opts;
+      $("openCounty").value = "taoyuan";
+      fillOpenDistricts();
+    }
   }
 
   function fillPredictDistricts() {
@@ -1732,6 +1933,327 @@
     if (state.tab === "resto") showTab("resto");
   }
 
+  function fillOpenDistricts() {
+    const sel = $("openDistrict");
+    if (!sel) return;
+    const cid = $("openCounty").value;
+    const names = cid ? (state.meta.counties.find((c) => c.id === cid)?.districtNames || []) : [];
+    const prev = sel.value;
+    sel.innerHTML = `<option value="">全部</option>` + names.map((n) => `<option value="${n}">${n}</option>`).join("");
+    if (names.includes(prev)) sel.value = prev;
+  }
+
+  function syncOpenWeightLabels() {
+    if ($("openWDemandVal")) $("openWDemandVal").textContent = $("openWDemand").value;
+    if ($("openWCompVal")) $("openWCompVal").textContent = $("openWComp").value;
+    if ($("openWIncVal")) $("openWIncVal").textContent = $("openWInc").value;
+  }
+
+  function readOpenForm() {
+    if (!$("openForm")) return;
+    state.open.scopeCounty = $("openCounty").value || "taoyuan";
+    state.open.scopeDistrict = $("openDistrict").value;
+    state.open.radius = Number($("openRadius").value);
+    state.open.topN = Number($("openTopN").value);
+    state.open.minPop = Number($("openMinPop").value || 0);
+    const minIncRaw = $("openMinInc").value.trim();
+    state.open.minInc = minIncRaw === "" ? null : Number(minIncRaw);
+    state.open.wDemand = Number($("openWDemand").value);
+    state.open.wComp = Number($("openWComp").value);
+    state.open.wInc = Number($("openWInc").value);
+    state.open.showHeat = $("openHeat").checked;
+    syncOpenWeightLabels();
+  }
+
+  function applyOpenScores() {
+    const rows = state.open.scored || [];
+    const pD = percentRanks(rows.map((r) => r.demand));
+    const pC = percentRanks(rows.map((r) => r.perShopMkt1));
+    const pI = percentRanks(rows.map((r) => r.incMed));
+    const wD = state.open.wDemand, wC = state.open.wComp, wI = state.open.wInc;
+    rows.forEach((r, i) => {
+      r.pDemand = pD[i];
+      r.pComp = pC[i];
+      r.pInc = r.incMed == null ? null : pI[i];
+      const parts = composeScore(r.pDemand, r.pComp, r.pInc, wD, wC, wI);
+      r.scoreParts = parts;
+      r.score = parts ? parts.score : null;
+    });
+    rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+    const picked = [];
+    const radius = state.open.radius;
+    for (const r of rows) {
+      if (r.score == null) continue;
+      if (picked.every((p) => distM(p.lat, p.lng, r.lat, r.lng) >= radius)) {
+        picked.push(r);
+        if (picked.length >= state.open.topN) break;
+      }
+    }
+    state.open.results = picked;
+    return picked;
+  }
+
+  function serializeOpenRow(r, i) {
+    return {
+      rank: i + 1,
+      county: r.county,
+      district: r.district,
+      village: r.village,
+      lat: r.lat,
+      lng: r.lng,
+      pop: r.pop,
+      shopDemand: r.demand,
+      shopIndex: r.index,
+      pop3059: r.pop3059,
+      pop4059: r.pop4059,
+      fem3069: r.fem3069,
+      mk: r.mk,
+      perShopMkt1: r.perShopMkt1,
+      nearestMarket: r.nearName,
+      nearMkt: r.near,
+      incMed: r.incMed,
+      score: r.score,
+      pDemand: r.pDemand,
+      pComp: r.pComp,
+      pInc: r.pInc,
+    };
+  }
+
+  async function runOpen(ev) {
+    if (ev) ev.preventDefault();
+    readOpenForm();
+    const status = $("openStatus");
+    const cid = state.open.scopeCounty;
+    status.textContent = "正在載入網格與村里資料…";
+    $("openResults").innerHTML = "";
+    let cells = [];
+    try {
+      await Promise.all([ensureGrid(cid), ensureCounty(cid), ensureMarkets(), ensureIncome(), ensureShopper()]);
+      cells = state.gridCache[cid] || [];
+    } catch (err) {
+      status.textContent = "載入失敗：" + err.message;
+      return;
+    }
+    const radius = state.open.radius;
+    const mkts = state.markets || [];
+    const scored = [];
+    const total = cells.length;
+    let seen = 0;
+    for (const c of cells) {
+      seen += 1;
+      if (seen % 500 === 0) {
+        status.textContent = `正在估算第 ${seen}／${total} 格…`;
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      if (state.open.scopeDistrict && c.district !== state.open.scopeDistrict) continue;
+      const rec = c.byR[radius];
+      if (!rec) continue;
+      if (rec.pop < state.open.minPop) continue;
+      const hits = collectVillageShares(c.lat, c.lng, radius);
+      let { bins, fb, wpop } = ageBinsFromHits(hits);
+      if (wpop > 0 && rec.pop) {
+        const fac = rec.pop / wpop;
+        bins = scaleBins(bins, fac);
+        fb = scaleBins(fb, fac);
+      }
+      const shop = shopperDemandFromBins(bins, fb);
+      if (shop.demand == null) continue;
+      const inc = incomeWeighted(hits.filter((h) => h.v.inc));
+      const incMed = inc ? inc.med : null;
+      if (state.open.minInc != null && (incMed == null || incMed / 10 < state.open.minInc)) continue;
+      let mk = 0, near = Infinity, nearName = null;
+      for (const m of mkts) {
+        const d = distM(c.lat, c.lng, m.lat, m.lng);
+        if (d <= radius) mk += 1;
+        if (d < near) { near = d; nearName = m.name; }
+      }
+      scored.push({
+        lat: c.lat,
+        lng: c.lng,
+        cid: c.cid,
+        county: c.county,
+        district: c.district,
+        village: c.village,
+        pop: rec.pop,
+        hh: rec.hh,
+        demand: shop.demand,
+        index: shop.index,
+        adults: shop.adults,
+        groups: shop.groups,
+        pop3059: shop.pop3059,
+        pop4059: shop.pop4059,
+        fem3069: shop.fem3069,
+        mk,
+        near: Number.isFinite(near) ? near : null,
+        nearName,
+        incMed,
+        perShopMkt1: shop.demand / (mk + 1),
+      });
+    }
+    state.open.scored = scored;
+    state.open.demandValues = scored.map((r) => r.demand);
+    state.open.compValues = scored.map((r) => r.perShopMkt1);
+    state.open.incValues = scored.map((r) => r.incMed).filter((v) => v != null);
+    const picked = applyOpenScores();
+    state.open.ran = true;
+    const scopeLabel = state.open.scopeDistrict
+      ? countyName(cid) + state.open.scopeDistrict
+      : countyName(cid);
+    const extras = [];
+    if (state.open.minPop) extras.push(`人口 ≥ ${fmtInt(state.open.minPop)}`);
+    if (state.open.minInc != null) extras.push(`所得中位數 ≥ ${state.open.minInc} 萬`);
+    status.textContent = `在 ${scopeLabel}、${radius}m${extras.length ? "、" + extras.join("、") : ""} 的 ${fmtInt(scored.length)} 個格子中，依開店評分列出前 ${picked.length} 名（已去除過近的點）。年齡權重來自臺南市市場調查，套用到本地是假設。`;
+    drawOpenLayers();
+    renderOpenList();
+    if (picked.length) {
+      const b = L.latLngBounds(picked.map((c) => [c.lat, c.lng]));
+      map.fitBounds(b, { padding: [40, 40], maxZoom: 13 });
+    }
+  }
+
+  function rescoreOpen() {
+    if (!state.open.ran) return;
+    readOpenForm();
+    applyOpenScores();
+    const status = $("openStatus");
+    if (status && state.open.scored) {
+      status.textContent = `已用目前權重重新計算評分，列出前 ${state.open.results.length} 名。需求 ${state.open.wDemand}、低競爭 ${state.open.wComp}、所得 ${state.open.wInc}。`;
+    }
+    if (state.mode === "open") {
+      drawOpenLayers();
+      renderOpenList();
+    }
+  }
+
+  function drawOpenLayers() {
+    heatLayer.clearLayers();
+    predictLayer.clearLayers();
+    if (state.open.showHeat && state.open.scored.length) {
+      if (!heatRenderer) heatRenderer = L.canvas({ padding: 0.35 });
+      const vals = state.open.scored.map((r) => r.score).filter((v) => v != null);
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      for (const r of state.open.scored) {
+        if (r.score == null) continue;
+        const t = max === min ? 0.5 : (r.score - min) / (max - min);
+        L.circleMarker([r.lat, r.lng], {
+          renderer: heatRenderer,
+          radius: 9,
+          stroke: false,
+          fillColor: colorRamp(t),
+          fillOpacity: 0.42,
+        }).addTo(heatLayer);
+      }
+      renderMetricLegend("開店評分", min, max, "int");
+    } else {
+      $("legend").hidden = true;
+    }
+    state.open.results.forEach((r, i) => {
+      const icon = L.divIcon({
+        className: "compare-icon",
+        html: String(i + 1),
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
+      L.marker([r.lat, r.lng], { icon, zIndexOffset: 700 })
+        .bindTooltip(`${i + 1}. ${r.district}${r.village}　評分 ${fmt1(r.score)}`)
+        .on("click", () => openOpenResult(r))
+        .addTo(predictLayer);
+    });
+    drawCompareMarkers();
+  }
+
+  function renderOpenList() {
+    const box = $("openResults");
+    if (!box) return;
+    if (!state.open.results.length) {
+      box.innerHTML = "<li>沒有符合條件的點，請放寬最低人口或其他條件。</li>";
+      return;
+    }
+    box.innerHTML = state.open.results.map((r, i) => `
+      <li data-i="${i}">
+        <div><span class="rank">${i + 1}.</span><span class="pred-title">${r.district}${r.village}</span></div>
+        <div class="pred-nums">
+          開店評分 ${fmt1(r.score)}
+          　潛在客群 ${fmtInt(r.demand)}（指數 ${fmt1(r.index)}）
+          　40–59歲 ${fmtInt(r.pop4059)}　30–59歲 ${fmtInt(r.pop3059)}
+          　女性30–69歲 ${fmtInt(r.fem3069)}
+          　市場 ${r.mk}　每(市場+1)服務 ${fmtInt(r.perShopMkt1)} 人
+          ${r.near != null ? "　最近 " + (r.nearName || "市場") + " " + fmtInt(r.near) + " 公尺" : ""}
+          ${r.incMed != null ? "　所得中位數 " + fmtWan(r.incMed) : ""}
+          　需求百分位 ${fmt1(r.pDemand)}　低競爭百分位 ${fmt1(r.pComp)}
+        </div>
+      </li>`).join("");
+    box.querySelectorAll("li[data-i]").forEach((li) => {
+      li.addEventListener("click", () => {
+        const r = state.open.results[Number(li.dataset.i)];
+        if (r) openOpenResult(r);
+      });
+    });
+  }
+
+  async function openOpenResult(row) {
+    setRadius(state.open.radius);
+    state.mode = "circle";
+    syncModeButtons();
+    showPanelForMode();
+    map.setView([row.lat, row.lng], 16);
+    await setCenter(row.lat, row.lng, row.district + row.village);
+    state.tab = "open";
+    showTab("open");
+    const focus = $("openSection") || $("tabOpen");
+    if (focus) focus.scrollIntoView({ block: "start" });
+  }
+
+  function renderOpenSection(s) {
+    const box = $("openSection");
+    if (!box) return;
+    const meta = shopperMeta();
+    if (!meta) {
+      box.innerHTML = "<p class='src-note'>正在載入菜市場消費年齡權重…</p>";
+      return;
+    }
+    const labels = {
+      "20-29": "20–29歲", "30-39": "30–39歲", "40-49": "40–49歲",
+      "50-59": "50–59歲", "60-69": "60–69歲", "70-79": "70–79歲", "80+": "80歲以上",
+    };
+    const adults = s.shopAdults || 0;
+    const rows = Object.keys(meta.ageBins).map((g) => {
+      const pop = (s.shopGroups && s.shopGroups[g]) || 0;
+      const share = adults ? (100 * pop) / adults : 0;
+      const shop = (meta.survey.ageShares[g] || 0) * 100;
+      return `<div class="shop-row"><span>${labels[g]}</span><span class="shop-track"><i style="width:${Math.min(100, share)}%"></i></span><span>${share.toFixed(1)}%</span></div>
+        <div class="shop-sub">圈內占20歲以上 ${share.toFixed(1)}%　臺南市場消費者 ${shop.toFixed(1)}%　消費傾向 ${meta.propensity[g].toFixed(2)}</div>`;
+    }).join("");
+    const mkNote = s.perShopMkt1 == null ? "" : `以潛在客群 ÷ (市場數 + 1) 計算，目前為 ${fmtInt(s.perShopMkt1)} 人。`;
+    const scoreNote = s.shopScoreParts
+      ? `<p>開店評分 <strong>${fmt1(s.shopScore)}</strong>＝（需求權重 ${s.shopScoreParts.wD} × 需求百分位 ${fmt1(s.shopScoreParts.pD)} + 低競爭權重 ${s.shopScoreParts.wC} × 低競爭百分位 ${fmt1(s.shopScoreParts.pC)}${s.shopScoreParts.wI > 0 && s.shopScoreParts.pI != null ? ` + 所得權重 ${s.shopScoreParts.wI} × 所得百分位 ${fmt1(s.shopScoreParts.pI)}` : ""}）÷ 權重總和。百分位是與「菜市場開店」同半徑、同範圍網格比較的結果。</p>`
+      : `<p class="src-note">到「菜市場開店」用相同半徑分析後，這裡會顯示與同批點位比較的評分與百分位。</p>`;
+    const mktList = (s.marketsIn || []).map((m) =>
+      `<li><strong>${m.name}</strong>　${m.type || ""}　${Math.round(m.dist)} 公尺${m.address ? "<br>" + m.address : ""}</li>`
+    ).join("");
+    box.innerHTML = `
+      <p class="src-warn">年齡權重來自臺南市市場處《${meta.survey.name}》（${meta.survey.surveyMonth}調查，${meta.survey.n}份有效問卷，${meta.survey.marketCount}處公有市場）。套用到桃園市與北台灣是假設，不是當地消費調查。女性消費者占 ${ (meta.survey.female*100).toFixed(1) }%，此比例未再另作加權。</p>
+      <div class="open-kvs">
+        <div><div class="k">菜市場潛在客群</div><div class="n">${s.shopDemand == null ? "—" : fmtInt(s.shopDemand)}</div></div>
+        <div><div class="k">潛在客群指數</div><div class="n">${s.shopIndex == null ? "—" : fmt1(s.shopIndex)}</div></div>
+        <div><div class="k">30–59歲人口</div><div class="n">${fmtInt(s.pop3059)}</div></div>
+        <div><div class="k">40–59歲人口</div><div class="n">${fmtInt(s.pop4059)}</div></div>
+        <div><div class="k">女性 30–69歲</div><div class="n">${fmtInt(s.fem3069)}</div></div>
+        <div><div class="k">圈內傳統市場</div><div class="n">${s.marketCount || 0}</div></div>
+      </div>
+      <p>指數 100 代表成年人口的消費傾向與臺南市民國111年4月20歲以上人口結構相同。潛在客群 ＝ Σ（各年齡層人口 × 消費傾向）÷ 0.975；消費傾向 ＝ 該年齡層消費者占比 ÷ 臺南市同年齡層占20歲以上人口之比。</p>
+      ${scoreNote}
+      <p>${mkNote} 最近市場：${s.nearestMarket ? `${s.nearestMarket.name} ${Math.round(s.nearestMarket.dist)} 公尺` : "本次資料範圍內沒有對到市場"}。</p>
+      <h4>年齡結構對照市場消費者</h4>
+      ${rows}
+      <p class="src-note">20歲以下、70–79歲、80歲以上在調查圖一未印出百分比；前兩項以外的剩餘 6.3% 依扇形角度量得為 2.5%、3.1%、0.7%。20歲以下不納入潛在客群（消費傾向分母為20歲以上人口）。圖一標示：20–29歲 9.5%、30–39歲 17.5%、40–49歲 26.1%、50–59歲 27.6%、60–69歲 13%。</p>
+      <h4>附近傳統市場</h4>
+      <ul class="store-list">${mktList || "<li>此範圍沒有列管或對位到的傳統市場</li>"}</ul>
+    `;
+  }
+
+
   function renderFooter() {
     const src = state.meta.sources || [];
     let body = src.map((s) => {
@@ -1751,6 +2273,10 @@
       const polys = j.polygons != null ? j.polygons : "";
       body += `<div><strong>村里綜合所得</strong>　財政部財政資訊中心「綜稅綜合所得總額各縣市鄉鎮村里統計分析表」112年度（所得年 2023；<a href="https://data.gov.tw/dataset/103066">data.gov.tw 103066</a>）。此為綜合所得稅申報資料，不含免稅所得、政府移轉支出與分離課稅所得；原表金額單位為千元，畫面改以萬元顯示。步行圈數字為圈內各里中位數／平均數按納稅單位（申報戶）加權平均，再與所在縣市同樣口徑比較；行政區中位數取各區合計列。114–115年新設里沿用分里前原里的 112 年統計（對上 ${matched}/${polys} 里）。</div>`;
     }
+    const shop = state.shopper;
+    if (shop && shop.survey) {
+      body += `<div><strong>菜市場消費年齡</strong>　${shop.survey.org}《${shop.survey.name}》（${shop.survey.surveyMonth}調查，報告${shop.survey.reportMonth}；${shop.survey.marketCount}處公有市場，有效問卷 ${shop.survey.n} 份）。圖一標示 20–29歲 9.5%、30–39歲 17.5%、40–49歲 26.1%、50–59歲 27.6%、60–69歲 13%；20歲以下、70–79歲、80歲以上未印百分比，依同一圓餅圖扇形量得剩餘 6.3% 分別為 2.5%、3.1%、0.7%。女性占 62.2%。消費傾向以各年齡層消費者占比除以臺南市民國111年4月戶政司 ODRP014 20歲以上人口占比。此權重套用到桃園市與北台灣是假設，不是當地消費調查。</div>`;
+    }
     $("footer").innerHTML = `<details class="sources" id="sourceDetails"><summary>資料來源</summary><div class="source-body">${body}</div></details>`;
     syncSourceDetails();
   }
@@ -1759,6 +2285,7 @@
     $("btnModeCircle").addEventListener("click", () => setMode("circle"));
     $("btnModeAdmin").addEventListener("click", () => setMode("admin"));
     $("btnModePredict").addEventListener("click", () => setMode("predict"));
+    if ($("btnModeOpen")) $("btnModeOpen").addEventListener("click", () => setMode("open"));
     $("adminCountyFilter").addEventListener("change", (e) => {
       state.adminCountyFilter = e.target.value;
       if (state.mode === "admin") {
@@ -1795,7 +2322,7 @@
       state.compare = [];
       renderCompare();
       drawCompareMarkers();
-      if (state.mode !== "predict" && state.stats) renderPanel();
+      if (state.mode !== "predict" && state.mode !== "open" && state.stats) renderPanel();
     });
     $("predictForm").addEventListener("submit", runPredict);
     $("predictCounty").addEventListener("change", fillPredictDistricts);
@@ -1803,6 +2330,23 @@
       state.predict.showHeat = $("predictHeat").checked;
       if (state.predict.ran && state.mode === "predict") drawPredictLayers();
     });
+    if ($("openForm")) {
+      $("openForm").addEventListener("submit", runOpen);
+      $("openCounty").addEventListener("change", fillOpenDistricts);
+      $("openHeat").addEventListener("change", () => {
+        state.open.showHeat = $("openHeat").checked;
+        if (state.open.ran && state.mode === "open") drawOpenLayers();
+      });
+      ["openWDemand", "openWComp", "openWInc"].forEach((id) => {
+        $(id).addEventListener("input", () => {
+          syncOpenWeightLabels();
+          if (state.open.ran) rescoreOpen();
+        });
+      });
+      $("openTopN").addEventListener("change", () => {
+        if (state.open.ran) rescoreOpen();
+      });
+    }
     window.addEventListener("resize", () => {
       syncSourceDetails();
       refreshMapSize();
@@ -1845,7 +2389,7 @@
       state.homeCountyId = dc.cid || "taoyuan";
     }
     renderFooter();
-    await Promise.all([ensureCounty(state.homeCountyId), ensureMarkets(), ensureIncome()]);
+    await Promise.all([ensureCounty(state.homeCountyId), ensureMarkets(), ensureIncome(), ensureShopper()]);
     renderFooter();
     map.setView([state.center.lat, state.center.lng], 16);
     await setCenter(state.center.lat, state.center.lng, state.placeName);
@@ -1890,6 +2434,14 @@
         incN: s.incN,
         countyIncMed: s.countyIncMed,
         countyIncAvg: s.countyIncAvg,
+        shopDemand: s.shopDemand,
+        shopIndex: s.shopIndex,
+        shopScore: s.shopScore,
+        shopAdults: s.shopAdults,
+        pop3059: s.pop3059,
+        pop4059: s.pop4059,
+        fem3069: s.fem3069,
+        perShopMkt1: s.perShopMkt1,
         hitIncome: (s.hits || []).map((h) => ({
           name: `${h.v.county || ""}${h.v.district}${h.v.name}`,
           ratio: Math.round(h.ratio * 1000) / 10,
@@ -1901,6 +2453,30 @@
         })),
       };
     },
+    openResults: () => (state.open.results || []).map((r, i) => serializeOpenRow(r, i)),
+    openTopByDistrict: (n) => {
+      n = n || 3;
+      const radius = state.open.radius;
+      const byD = {};
+      for (const r of state.open.scored || []) {
+        if (r.score == null) continue;
+        const list = byD[r.district] || (byD[r.district] = []);
+        if (list.length >= n) continue;
+        if (list.every((p) => distM(p.lat, p.lng, r.lat, r.lng) >= radius)) {
+          list.push(serializeOpenRow(r, list.length));
+        }
+      }
+      return byD;
+    },
+    openRunInfo: () => ({
+      ran: state.open.ran,
+      radius: state.open.radius,
+      county: state.open.scopeCounty,
+      district: state.open.scopeDistrict,
+      scored: (state.open.scored || []).length,
+      weights: { demand: state.open.wDemand, comp: state.open.wComp, inc: state.open.wInc },
+      minPop: state.open.minPop,
+    }),
     predictResults: () => state.predict.results.map((c, i) => {
       const rec = c.byR[state.predict.radius];
       return {

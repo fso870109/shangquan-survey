@@ -19,6 +19,7 @@
         <button type="button" id="btnModeCircle" class="active" data-mode="circle">步行圈</button>
         <button type="button" id="btnModeAdmin" data-mode="admin">看行政區</button>
         <button type="button" id="btnModePredict" data-mode="predict">點位預判器</button>
+        <button type="button" id="btnModeOpen" data-mode="open">菜市場開店</button>
       </div>
     </div>
   </header>
@@ -100,11 +101,13 @@
           <button type="button" class="active" data-tab="age">年齡結構</button>
           <button type="button" data-tab="brand">連鎖品牌</button>
           <button type="button" data-tab="market" id="tabMarket">傳統市場</button>
+          <button type="button" data-tab="open" id="tabOpen">菜市場開店</button>
           <button type="button" data-tab="resto" id="tabResto" hidden>餐廳</button>
         </div>
         <section id="ageSection" class="tab-panel"></section>
         <section id="brandSection" class="tab-panel" hidden></section>
         <section id="marketSection" class="tab-panel" hidden></section>
+        <section id="openSection" class="tab-panel" hidden></section>
         <section id="restoSection" class="tab-panel" hidden></section>
       </div>
 
@@ -189,6 +192,66 @@
         </form>
         <p id="predictStatus" class="hint"></p>
         <ol id="predictResults" class="predict-results"></ol>
+      </div>
+
+      <div id="openBody" hidden>
+        <div class="place">
+          <div class="kicker">菜市場開店分析</div>
+          <h2>依消費年齡找合適點位</h2>
+          <p class="src-warn">年齡權重來自<a href="https://www.tainan.gov.tw/" target="_blank" rel="noopener">臺南市市場處</a>《111年分析－臺南市公有市場消費結構及習慣調查分析》（111年4月調查、548份有效問卷、10處公有市場）。套用到桃園市與北台灣是假設，不是當地消費調查。</p>
+        </div>
+        <form id="openForm" class="predict-form">
+          <label>範圍縣市
+            <select id="openCounty"></select>
+          </label>
+          <label>範圍行政區
+            <select id="openDistrict">
+              <option value="">全部（桃園市預設為13區）</option>
+            </select>
+          </label>
+          <div class="predict-row">
+            <label>步行圈半徑（市場商圈）
+              <select id="openRadius">
+                <option value="300">300m（約4分鐘）</option>
+                <option value="500">500m（約7分鐘）</option>
+                <option value="800" selected>800m（約10分鐘）</option>
+              </select>
+            </label>
+            <label>列出前幾名
+              <select id="openTopN">
+                <option value="10" selected>10</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
+          <div class="predict-row">
+            <label>最低人口
+              <input id="openMinPop" type="number" min="0" step="100" value="1000" />
+            </label>
+            <label>所得中位數下限（萬，選填）
+              <input id="openMinInc" type="number" min="0" step="1" placeholder="不限" />
+            </label>
+          </div>
+          <div class="weight-grid">
+            <p class="src-note">開店評分 =（需求權重×需求百分位 + 低競爭權重×低競爭百分位 + 所得權重×所得百分位）÷ 權重總和。百分位是本次篩選結果內部的排序，不是絕對好壞。</p>
+            <label>需求權重（潛在客群）<span id="openWDemandVal">5</span>
+              <input id="openWDemand" type="range" min="0" max="10" step="1" value="5" />
+            </label>
+            <label>低競爭權重（潛在客群÷(市場數+1)）<span id="openWCompVal">5</span>
+              <input id="openWComp" type="range" min="0" max="10" step="1" value="5" />
+            </label>
+            <label>所得權重（所得中位數，預設不計入）<span id="openWIncVal">0</span>
+              <input id="openWInc" type="range" min="0" max="10" step="1" value="0" />
+            </label>
+          </div>
+          <label class="layer-toggle predict-heat-toggle">
+            <input type="checkbox" id="openHeat" checked />
+            在地圖上顯示評分熱力
+          </label>
+          <button type="submit" class="btn-primary" id="openRun">開始分析</button>
+        </form>
+        <p id="openStatus" class="hint"></p>
+        <ol id="openResults" class="predict-results"></ol>
       </div>
     </aside>
   </main>
