@@ -67,8 +67,22 @@ button, input, select { font: inherit; }
   background: #fff;
 }
 .layout { display: flex; flex: 1; min-height: 0; }
-.map-pane { position: relative; flex: 1; min-width: 0; }
+.map-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.map-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
 #map { height: 100%; width: 100%; background: #efe6db; }
+.r-sm { display: none; }
 .map-overlay {
   position: absolute;
   top: 12px;
@@ -101,6 +115,7 @@ button, input, select { font: inherit; }
   max-height: 280px;
   overflow: auto;
   box-shadow: var(--shadow);
+  z-index: 800;
 }
 #searchResults li {
   padding: 8px 12px;
@@ -249,7 +264,7 @@ button, input, select { font: inherit; }
 }
 .compare-head { display: flex; justify-content: space-between; align-items: center; }
 .compare h3 { margin: 0; }
-.table-scroll { overflow: auto; }
+.table-scroll { overflow: auto; -webkit-overflow-scrolling: touch; }
 .compare table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .footer {
   padding: 12px 20px 18px;
@@ -275,8 +290,120 @@ button, input, select { font: inherit; }
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0,0,0,0.25);
 }
-@media (max-width: 900px) {
-  .layout { flex-direction: column; }
-  .map-pane { height: 58vh; }
-  .panel { width: 100%; height: auto; border-left: 0; border-top: 1px solid var(--line); }
+.footer summary { display: none; }
+
+@media (max-width: 768px) {
+  html, body {
+    height: auto;
+    min-height: 100%;
+  }
+  body { display: block; }
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .brand h1 { font-size: 18px; letter-spacing: 0.02em; }
+  .brand p { display: none; }
+  .toolbar {
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .mode-switch button { padding: 6px 12px; font-size: 14px; }
+  .county-label { display: flex; align-items: center; gap: 6px; }
+  .county-label select { margin-left: 0; max-width: 46vw; }
+
+  .layout {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    min-height: 0;
+    height: auto;
+  }
+  .map-pane {
+    flex: none;
+    height: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .map-overlay {
+    position: static;
+    width: 100%;
+    padding: 10px 12px 8px;
+    gap: 8px;
+    pointer-events: auto;
+    z-index: 2;
+  }
+  .map-overlay > * { pointer-events: auto; }
+  .search-box input { box-shadow: none; }
+  #radiusBar {
+    width: 100%;
+  }
+  #radiusBar button {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+    padding: 8px 4px;
+    font-size: 13px;
+  }
+  .r-lg { display: none; }
+  .r-sm { display: inline; }
+  .admin-bar {
+    box-shadow: none;
+  }
+  .admin-bar select { margin-left: 0; margin-top: 4px; max-width: 100%; }
+  .layer-toggle {
+    width: 100%;
+    box-shadow: none;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+  .map-stage {
+    flex: none;
+    height: 55vh;
+    min-height: 280px;
+    width: 100%;
+  }
+  #map { height: 100%; }
+  .map-hint {
+    bottom: 10px;
+    max-width: calc(100% - 24px);
+    text-align: center;
+    font-size: 11px;
+    padding: 5px 10px;
+    z-index: 450;
+  }
+  .legend {
+    bottom: 42px;
+    right: 8px;
+    max-width: 46%;
+  }
+  .panel {
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 16px 14px 24px;
+  }
+  .metric .value { font-size: 22px; }
+  .age-row { grid-template-columns: 64px 1fr 78px; gap: 6px; font-size: 12px; }
+  .compare {
+    padding: 12px 14px 16px;
+  }
+  .compare table { min-width: 520px; }
+  .footer {
+    padding: 10px 14px 20px;
+  }
+  .footer summary {
+    display: list-item;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--ink);
+    font-size: 14px;
+  }
+  .footer .source-body { margin-top: 8px; }
 }
+

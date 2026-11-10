@@ -137,6 +137,21 @@
       if (state.mode !== "circle") return;
       setCenter(e.latlng.lat, e.latlng.lng, null);
     });
+    refreshMapSize();
+  }
+
+  function refreshMapSize() {
+    if (!map) return;
+    requestAnimationFrame(() => {
+      map.invalidateSize({ animate: false });
+      setTimeout(() => { if (map) map.invalidateSize({ animate: false }); }, 200);
+    });
+  }
+
+  function syncSourceDetails() {
+    const d = $("sourceDetails");
+    if (!d) return;
+    d.open = !window.matchMedia("(max-width: 768px)").matches;
   }
 
   function drawCircleOnly(lat, lng, radius) {
@@ -801,6 +816,7 @@
       map.setView([state.center.lat, state.center.lng], 15);
       setCenter(state.center.lat, state.center.lng, state.placeName);
     }
+    refreshMapSize();
   }
 
   async function loadRestaurants() {
@@ -855,12 +871,14 @@
 
   function renderFooter() {
     const src = state.meta.sources || [];
-    $("footer").innerHTML = src.map((s) => {
+    const body = src.map((s) => {
       const dates = (s.dates || [s.date]).filter(Boolean).join("、");
       return `<div><strong>${s.name}</strong>　${s.org || ""}${dates ? "　" + dates : ""}${s.note ? "　" + s.note : ""}</div>`;
     }).join("") +
       `<div>${state.meta.method || ""}</div>
        <div>人口為戶籍登記數，非常住／實際居住人口。步行圈以村里多邊形與圓相交的面積比例估算，假設人口在村里內均勻分布。</div>`;
+    $("footer").innerHTML = `<details class="sources" id="sourceDetails"><summary>資料來源</summary><div class="source-body">${body}</div></details>`;
+    syncSourceDetails();
   }
 
   function bindUI() {
@@ -905,6 +923,16 @@
       drawCompareMarkers();
       renderPanel();
     });
+    window.addEventListener("resize", () => {
+      syncSourceDetails();
+      refreshMapSize();
+    });
+    window.addEventListener("orientationchange", () => {
+      setTimeout(() => { syncSourceDetails(); refreshMapSize(); }, 250);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", refreshMapSize);
+    }
     $("toggleRestaurants").addEventListener("change", (e) => {
       state.showRestaurants = e.target.checked;
       if (state.showRestaurants) {
@@ -935,6 +963,7 @@
     await loadCounty(state.countyId, { fit: false });
     map.setView([state.center.lat, state.center.lng], 16);
     setCenter(state.center.lat, state.center.lng, state.placeName);
+    refreshMapSize();
     try {
       state.search = await loadJSON("data/search.json");
     } catch (e) {

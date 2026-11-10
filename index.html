@@ -27,7 +27,6 @@
 
   <main class="layout">
     <section class="map-pane">
-      <div id="map" role="application" aria-label="商圈地圖"></div>
       <div class="map-overlay">
         <div class="search-box">
           <input id="searchInput" type="search" autocomplete="off"
@@ -35,9 +34,9 @@
           <ul id="searchResults" hidden></ul>
         </div>
         <div id="radiusBar" class="chip-row">
-          <button type="button" data-r="300">300m　約4分鐘</button>
-          <button type="button" data-r="500" class="active">500m　約7分鐘</button>
-          <button type="button" data-r="800">800m　約10分鐘</button>
+          <button type="button" data-r="300"><span class="r-lg">300m　約4分鐘</span><span class="r-sm">300m 4分</span></button>
+          <button type="button" data-r="500" class="active"><span class="r-lg">500m　約7分鐘</span><span class="r-sm">500m 7分</span></button>
+          <button type="button" data-r="800"><span class="r-lg">800m　約10分鐘</span><span class="r-sm">800m 10分</span></button>
         </div>
         <div id="adminBar" class="admin-bar" hidden>
           <label>著色指標
@@ -55,8 +54,11 @@
           顯示圈內餐廳（OpenStreetMap）
         </label>
       </div>
-      <div id="legend" class="legend" hidden></div>
-      <div id="mapHint" class="map-hint">點地圖設定中心，或拖曳橘色圓點</div>
+      <div class="map-stage">
+        <div id="map" role="application" aria-label="商圈地圖"></div>
+        <div id="legend" class="legend" hidden></div>
+        <div id="mapHint" class="map-hint">點地圖設定中心，或拖曳橘色圓點</div>
+      </div>
     </section>
 
     <aside class="panel" id="panel">
