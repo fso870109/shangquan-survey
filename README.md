@@ -14,11 +14,14 @@
 
 全家官方門市 API（api.map.com.tw）目前無法取得有效資料，故改用 OSM。OSM 門市覆蓋率可能低於實際家數。
 
-人口為**戶籍人口**，非常住人口。步行圈人口以「圓與村里多邊形相交面積／村里面積 × 村里人口」估算。
+人口為**戶籍人口**，非常住人口。步行圈人口以「圓與村里多邊形相交面積／村里面積 × 村里人口」估算；圓若跨縣市會加總所有相交村里，比較基準為中心點所在縣市平均。
+
+點位預判器以約 250 公尺間距網格預先計算 300／500／800m 步行圈估算（`scripts/build_grid.py`），上榜點會再以約一個半徑的距離去重。
 
 ## 重建資料
 
 ```bash
 python3 scripts/fetch_stores.py   # 需先有村里界 shapefile
 python3 scripts/build_data.py
+python3 scripts/build_grid.py   # 點位預判器網格
 ```

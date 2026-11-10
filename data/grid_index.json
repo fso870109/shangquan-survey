@@ -1,0 +1,36 @@
+{
+  "spacingM": 250.0,
+  "radii": [
+    300,
+    500,
+    800
+  ],
+  "minPop500": 80,
+  "files": {
+    "taipei": {
+      "file": "data/grid_taipei.json",
+      "n": 4008,
+      "bytes": 691048
+    },
+    "newtaipei": {
+      "file": "data/grid_newtaipei.json",
+      "n": 14263,
+      "bytes": 2249122
+    },
+    "taoyuan": {
+      "file": "data/grid_taoyuan.json",
+      "n": 14191,
+      "bytes": 2241227
+    },
+    "hsinchu_city": {
+      "file": "data/grid_hsinchu_city.json",
+      "n": 1897,
+      "bytes": 300551
+    },
+    "hsinchu_county": {
+      "file": "data/grid_hsinchu_county.json",
+      "n": 7657,
+      "bytes": 1146058
+    }
+  }
+}

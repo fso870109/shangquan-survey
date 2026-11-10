@@ -18,10 +18,8 @@
       <div class="mode-switch" role="tablist">
         <button type="button" id="btnModeCircle" class="active" data-mode="circle">步行圈</button>
         <button type="button" id="btnModeAdmin" data-mode="admin">看行政區</button>
+        <button type="button" id="btnModePredict" data-mode="predict">點位預判器</button>
       </div>
-      <label class="county-label">縣市
-        <select id="countySelect" aria-label="選擇縣市"></select>
-      </label>
     </div>
   </header>
 
@@ -39,14 +37,21 @@
           <button type="button" data-r="800"><span class="r-lg">800m　約10分鐘</span><span class="r-sm">800m 10分</span></button>
         </div>
         <div id="adminBar" class="admin-bar" hidden>
-          <label>著色指標
-            <select id="indicatorSelect">
-              <option value="density">人口密度</option>
-              <option value="age2544">25–44歲占比</option>
-              <option value="age65">65歲以上占比</option>
-              <option value="cvs">超商家數</option>
-            </select>
-          </label>
+          <div class="filter-row">
+            <label>著色指標
+              <select id="indicatorSelect">
+                <option value="density">人口密度</option>
+                <option value="age2544">25–44歲占比</option>
+                <option value="age65">65歲以上占比</option>
+                <option value="cvs">超商家數</option>
+              </select>
+            </label>
+            <label>縣市篩選（選填）
+              <select id="adminCountyFilter" aria-label="行政區縣市篩選">
+                <option value="">全部縣市</option>
+              </select>
+            </label>
+          </div>
           <div id="districtBtns" class="chip-row wrap"></div>
         </div>
         <label class="layer-toggle" id="restoToggleWrap">
@@ -62,7 +67,7 @@
     </section>
 
     <aside class="panel" id="panel">
-      <div id="panelEmpty" class="empty">正在載入桃園市資料…</div>
+      <div id="panelEmpty" class="empty">正在載入資料…</div>
       <div id="panelBody" hidden>
         <div class="place">
           <div class="kicker" id="placeKicker">中心點</div>
@@ -90,6 +95,72 @@
         <section id="ageSection" class="tab-panel"></section>
         <section id="brandSection" class="tab-panel" hidden></section>
         <section id="restoSection" class="tab-panel" hidden></section>
+      </div>
+
+      <div id="predictBody" hidden>
+        <div class="place">
+          <div class="kicker">點位預判器</div>
+          <h2>篩選合適的點位</h2>
+          <p class="src-note">以約 250 公尺間距的網格，用與步行圈相同的方式估算<strong>戶籍人口</strong>（非常住／實際居住人口）。結果會拉開約一個半徑的距離，避免相鄰格子重複上榜。</p>
+        </div>
+        <form id="predictForm" class="predict-form">
+          <label>排序指標
+            <select id="predictMetric">
+              <option value="age65">65歲以上占比</option>
+              <option value="age2544">25–44歲占比</option>
+              <option value="age014">0–14歲占比</option>
+              <option value="pop">人口</option>
+              <option value="y1">近1年人口成長率</option>
+              <option value="y5">近5年人口成長率</option>
+              <option value="perCvs">每家超商服務人數（競爭少）</option>
+              <option value="resto">OSM 餐廳數</option>
+            </select>
+          </label>
+          <label>排序方向
+            <select id="predictDir">
+              <option value="desc">由高到低</option>
+              <option value="asc">由低到高</option>
+            </select>
+          </label>
+          <div class="predict-row">
+            <label>最低人口
+              <input id="predictMinPop" type="number" min="0" step="100" value="3000" />
+            </label>
+            <label>最高人口
+              <input id="predictMaxPop" type="number" min="0" step="100" placeholder="不限" />
+            </label>
+          </div>
+          <label>範圍縣市
+            <select id="predictCounty"></select>
+          </label>
+          <label>範圍行政區
+            <select id="predictDistrict">
+              <option value="">全部</option>
+            </select>
+          </label>
+          <div class="predict-row">
+            <label>步行圈半徑
+              <select id="predictRadius">
+                <option value="300">300m（約4分鐘）</option>
+                <option value="500" selected>500m（約7分鐘）</option>
+                <option value="800">800m（約10分鐘）</option>
+              </select>
+            </label>
+            <label>列出前幾名
+              <select id="predictTopN">
+                <option value="10" selected>10</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
+          <label class="layer-toggle predict-heat-toggle">
+            <input type="checkbox" id="predictHeat" checked />
+            在地圖上顯示指標熱力
+          </label>
+          <button type="submit" class="btn-primary" id="predictRun">開始篩選</button>
+        </form>
+        <p id="predictStatus" class="hint"></p>
+        <ol id="predictResults" class="predict-results"></ol>
       </div>
     </aside>
   </main>
