@@ -1,0 +1,214 @@
+{
+  "title": "商圈調查小幫手",
+  "asOf": "2026-09",
+  "asOfLabel": "民國115年9月",
+  "scope": [
+    "臺北市",
+    "新北市",
+    "桃園市",
+    "新竹市",
+    "新竹縣"
+  ],
+  "counties": [
+    {
+      "id": "taipei",
+      "name": "臺北市",
+      "code": "63000",
+      "file": "data/taipei.json",
+      "center": [
+        121.5654,
+        25.0375
+      ],
+      "zoom": 12,
+      "bbox": [
+        121.457195,
+        24.9605,
+        121.665925,
+        25.210141
+      ],
+      "pop": 2418872,
+      "districts": 12,
+      "villages": 456,
+      "stores": {
+        "s711": 978,
+        "fami": 544,
+        "sbux": 110,
+        "mcd": 78
+      }
+    },
+    {
+      "id": "newtaipei",
+      "name": "新北市",
+      "code": "65000",
+      "file": "data/newtaipei.json",
+      "center": [
+        121.4628,
+        25.0169
+      ],
+      "zoom": 10,
+      "bbox": [
+        121.282752,
+        24.673243,
+        122.007501,
+        25.300303
+      ],
+      "pop": 4034572,
+      "districts": 29,
+      "villages": 1039,
+      "stores": {
+        "s711": 1233,
+        "fami": 771,
+        "sbux": 71,
+        "mcd": 69
+      }
+    },
+    {
+      "id": "taoyuan",
+      "name": "桃園市",
+      "code": "68000",
+      "file": "data/taoyuan.json",
+      "center": [
+        121.2256,
+        24.9536
+      ],
+      "zoom": 11,
+      "bbox": [
+        120.982033,
+        24.586456,
+        121.479996,
+        25.123613
+      ],
+      "pop": 2358611,
+      "districts": 13,
+      "villages": 529,
+      "stores": {
+        "s711": 865,
+        "fami": 403,
+        "sbux": 49,
+        "mcd": 48
+      }
+    },
+    {
+      "id": "hsinchu_city",
+      "name": "新竹市",
+      "code": "10018",
+      "file": "data/hsinchu_city.json",
+      "center": [
+        120.9739,
+        24.8066
+      ],
+      "zoom": 12,
+      "bbox": [
+        120.874537,
+        24.712594,
+        121.033526,
+        24.854773
+      ],
+      "pop": 455731,
+      "districts": 3,
+      "villages": 122,
+      "stores": {
+        "s711": 182,
+        "fami": 100,
+        "sbux": 18,
+        "mcd": 19
+      }
+    },
+    {
+      "id": "hsinchu_county",
+      "name": "新竹縣",
+      "code": "10004",
+      "file": "data/hsinchu_county.json",
+      "center": [
+        121.0177,
+        24.8397
+      ],
+      "zoom": 11,
+      "bbox": [
+        120.925229,
+        24.427375,
+        121.412257,
+        24.946379
+      ],
+      "pop": 598229,
+      "districts": 13,
+      "villages": 193,
+      "stores": {
+        "s711": 229,
+        "fami": 127,
+        "sbux": 13,
+        "mcd": 13
+      }
+    }
+  ],
+  "defaultCounty": "taoyuan",
+  "defaultCenter": {
+    "name": "中壢火車站",
+    "lat": 24.953317,
+    "lng": 121.22616,
+    "county": "桃園市",
+    "cid": "taoyuan"
+  },
+  "brands": {
+    "s711": {
+      "name": "7-ELEVEN",
+      "short": "7-11",
+      "color": "#f97316"
+    },
+    "fami": {
+      "name": "全家",
+      "short": "全家",
+      "color": "#16a34a"
+    },
+    "sbux": {
+      "name": "星巴克",
+      "short": "星巴克",
+      "color": "#00704A"
+    },
+    "mcd": {
+      "name": "麥當勞",
+      "short": "麥當勞",
+      "color": "#dc2626"
+    }
+  },
+  "sources": [
+    {
+      "name": "村里戶數、單一年齡人口（新增區域代碼）",
+      "org": "內政部戶政司",
+      "url": "https://data.gov.tw/dataset/77132",
+      "api": "https://www.ris.gov.tw/rs-opendata/api/v1/datastore/ODRP014/{yyyymm}",
+      "dates": [
+        "民國115年9月（現況）",
+        "民國114年9月（近1年）",
+        "民國110年9月（近5年）"
+      ],
+      "note": "戶籍人口，非常住人口。"
+    },
+    {
+      "name": "村里界圖（TWD97經緯度）VILLAGE_NLSC_1150817",
+      "org": "內政部國土測繪中心",
+      "url": "https://data.gov.tw/dataset/7438",
+      "date": "2026-08-17",
+      "note": "面積以 WGS84 橢球面積分計算；網頁繪製時對多邊形做了約 20 公尺簡化。"
+    },
+    {
+      "name": "7-ELEVEN 門市",
+      "org": "統一超商官方電子地圖 EMapSDK",
+      "url": "https://emap.pcsc.com.tw/",
+      "date": "統一超商官方電子地圖 EMapSDK SearchStore（2026-11-10）"
+    },
+    {
+      "name": "全家、星巴克、麥當勞門市與車站",
+      "org": "OpenStreetMap 貢獻者（Overpass API）",
+      "url": "https://www.openstreetmap.org/copyright",
+      "date": "2026-11-10",
+      "note": "全家官方門市 API 目前無法取得，改以 OSM 標註；覆蓋率可能低於實際家數。"
+    },
+    {
+      "name": "底圖",
+      "org": "內政部國土測繪中心臺灣通用電子地圖（EMAP WMTS）",
+      "url": "https://maps.nlsc.gov.tw/"
+    }
+  ],
+  "method": "步行圈人口＝各村里戶籍人口 ×（圓與村里多邊形相交面積／村里面積）。人口密度＝估計人口／圓面積（πr²）。縣市平均以該縣市全部村里加總計算。"
+}

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>商圈調查小幫手</title>
+  <meta name="description" content="以村里戶籍人口與步行圈，查看北台灣商圈的人口結構與連鎖品牌分布。" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>商圈調查小幫手</h1>
+      <p>點地圖或搜尋里名、車站、門市，估算步行圈內的人口結構與連鎖品牌</p>
+    </div>
+    <div class="toolbar">
+      <div class="mode-switch" role="tablist">
+        <button type="button" id="btnModeCircle" class="active" data-mode="circle">步行圈</button>
+        <button type="button" id="btnModeAdmin" data-mode="admin">看行政區</button>
+      </div>
+      <label class="county-label">縣市
+        <select id="countySelect" aria-label="選擇縣市"></select>
+      </label>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="map-pane">
+      <div id="map" role="application" aria-label="商圈地圖"></div>
+      <div class="map-overlay">
+        <div class="search-box">
+          <input id="searchInput" type="search" autocomplete="off"
+            placeholder="搜尋里名、鄉鎮區、門市或車站名稱" />
+          <ul id="searchResults" hidden></ul>
+        </div>
+        <div id="radiusBar" class="chip-row">
+          <button type="button" data-r="300">300m　約4分鐘</button>
+          <button type="button" data-r="500" class="active">500m　約7分鐘</button>
+          <button type="button" data-r="800">800m　約10分鐘</button>
+        </div>
+        <div id="adminBar" class="admin-bar" hidden>
+          <label>著色指標
+            <select id="indicatorSelect">
+              <option value="density">人口密度</option>
+              <option value="age2544">25–44歲占比</option>
+              <option value="age65">65歲以上占比</option>
+              <option value="cvs">超商家數</option>
+            </select>
+          </label>
+          <div id="districtBtns" class="chip-row wrap"></div>
+        </div>
+        <label class="layer-toggle" id="restoToggleWrap">
+          <input type="checkbox" id="toggleRestaurants" />
+          顯示圈內餐廳（OpenStreetMap）
+        </label>
+      </div>
+      <div id="legend" class="legend" hidden></div>
+      <div id="mapHint" class="map-hint">點地圖設定中心，或拖曳橘色圓點</div>
+    </section>
+
+    <aside class="panel" id="panel">
+      <div id="panelEmpty" class="empty">正在載入桃園市資料…</div>
+      <div id="panelBody" hidden>
+        <div class="place">
+          <div class="kicker" id="placeKicker">中心點</div>
+          <h2 id="placeTitle">—</h2>
+          <p class="place-sub" id="placeSub"></p>
+        </div>
+
+        <div class="metric-grid" id="metricGrid"></div>
+
+        <div class="actions">
+          <button type="button" id="btnCompare" class="btn-primary">加入比較</button>
+          <span id="compareHint" class="hint"></span>
+        </div>
+
+        <details id="villListWrap" class="block">
+          <summary>圈到哪些里 <span id="villCount"></span></summary>
+          <ul id="villList" class="vill-list"></ul>
+        </details>
+
+        <div class="tabs">
+          <button type="button" class="active" data-tab="age">年齡結構</button>
+          <button type="button" data-tab="brand">連鎖品牌</button>
+          <button type="button" data-tab="resto" id="tabResto" hidden>餐廳</button>
+        </div>
+        <section id="ageSection" class="tab-panel"></section>
+        <section id="brandSection" class="tab-panel" hidden></section>
+        <section id="restoSection" class="tab-panel" hidden></section>
+      </div>
+    </aside>
+  </main>
+
+  <section id="compareWrap" class="compare" hidden>
+    <div class="compare-head">
+      <h3>地點比較</h3>
+      <button type="button" id="btnClearCompare" class="btn-text">全部清除</button>
+    </div>
+    <div class="table-scroll">
+      <table id="compareTable"></table>
+    </div>
+  </section>
+
+  <footer class="footer" id="footer"></footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
