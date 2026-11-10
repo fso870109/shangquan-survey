@@ -44,6 +44,8 @@
                 <option value="age2544">25–44歲占比</option>
                 <option value="age65">65歲以上占比</option>
                 <option value="cvs">超商家數</option>
+                <option value="markets">市場數</option>
+                <option value="perMkt">每市場服務人數</option>
               </select>
             </label>
             <label>縣市篩選（選填）
@@ -54,10 +56,16 @@
           </div>
           <div id="districtBtns" class="chip-row wrap"></div>
         </div>
-        <label class="layer-toggle" id="restoToggleWrap">
-          <input type="checkbox" id="toggleRestaurants" />
-          顯示圈內餐廳（OpenStreetMap）
-        </label>
+        <div class="layer-toggles">
+          <label class="layer-toggle" id="marketToggleWrap">
+            <input type="checkbox" id="toggleMarkets" checked />
+            傳統市場 <span id="marketToggleCount"></span>
+          </label>
+          <label class="layer-toggle" id="restoToggleWrap">
+            <input type="checkbox" id="toggleRestaurants" />
+            顯示圈內餐廳（OpenStreetMap）
+          </label>
+        </div>
       </div>
       <div class="map-stage">
         <div id="map" role="application" aria-label="商圈地圖"></div>
@@ -90,10 +98,12 @@
         <div class="tabs">
           <button type="button" class="active" data-tab="age">年齡結構</button>
           <button type="button" data-tab="brand">連鎖品牌</button>
+          <button type="button" data-tab="market" id="tabMarket">傳統市場</button>
           <button type="button" data-tab="resto" id="tabResto" hidden>餐廳</button>
         </div>
         <section id="ageSection" class="tab-panel"></section>
         <section id="brandSection" class="tab-panel" hidden></section>
+        <section id="marketSection" class="tab-panel" hidden></section>
         <section id="restoSection" class="tab-panel" hidden></section>
       </div>
 
@@ -113,6 +123,11 @@
               <option value="y1">近1年人口成長率</option>
               <option value="y5">近5年人口成長率</option>
               <option value="perCvs">每家超商服務人數（競爭少）</option>
+              <option value="perMkt">每市場服務人數最多</option>
+              <option value="mk">圈內市場數</option>
+              <option value="nearMkt">距最近市場</option>
+              <option value="age45p">45歲以上占比</option>
+              <option value="age4564">45–64歲占比</option>
               <option value="resto">OSM 餐廳數</option>
             </select>
           </label>
@@ -130,6 +145,9 @@
               <input id="predictMaxPop" type="number" min="0" step="100" placeholder="不限" />
             </label>
           </div>
+          <label>圈內市場數上限
+            <input id="predictMaxMk" type="number" min="0" step="1" placeholder="不限，例如填 1 表示市場少" />
+          </label>
           <label>範圍縣市
             <select id="predictCounty"></select>
           </label>

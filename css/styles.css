@@ -167,6 +167,7 @@ button, input, select { font: inherit; }
 .predict-results .pred-title { font-weight: 700; }
 .predict-results .pred-nums { font-size: 13px; color: var(--muted); margin: 4px 0 0; line-height: 1.55; }
 
+.layer-toggles { display: flex; flex-wrap: wrap; gap: 8px; }
 .layer-toggle {
   display: inline-flex;
   align-items: center;
@@ -178,6 +179,23 @@ button, input, select { font: inherit; }
   box-shadow: var(--shadow);
   width: max-content;
 }
+.mkt-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px 7px 7px 2px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  line-height: 1;
+}
+.mkt-pin.out { opacity: 0.45; filter: saturate(0.7); }
+#marketToggleCount { color: var(--accent); font-weight: 700; }
+.market-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 8px 0; font-size: 12px; color: var(--muted); }
 .legend {
   position: absolute;
   right: 12px;
@@ -323,7 +341,8 @@ button, input, select { font: inherit; }
   font-weight: 700;
   box-shadow: 0 2px 6px rgba(0,0,0,0.25);
 }
-.footer summary { display: none; }
+.footer summary { display: list-item; cursor: pointer; font-weight: 600; color: var(--ink); }
+.footer .source-body { margin-top: 8px; }
 
 @media (max-width: 768px) {
   html, body {
@@ -385,6 +404,7 @@ button, input, select { font: inherit; }
     box-shadow: none;
   }
   .admin-bar select { margin-left: 0; margin-top: 4px; max-width: 100%; }
+  .layer-toggles { width: 100%; }
   .layer-toggle {
     width: 100%;
     box-shadow: none;

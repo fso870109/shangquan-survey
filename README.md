@@ -11,6 +11,12 @@
 | 7-ELEVEN 門市 | 統一超商官方電子地圖 EMapSDK SearchStore | 2026-11-10 |
 | 全家、星巴克、麥當勞、車站 | OpenStreetMap（Geofabrik `taiwan-latest.osm.pbf`） | 2026-11-08 |
 | 底圖 | 內政部國土測繪中心臺灣通用電子地圖 EMAP WMTS | — |
+| 全國零售市場基本資料 | 經濟部商業發展署（[data.gov.tw/dataset/59855](https://data.gov.tw/dataset/59855)） | 品管 2026-09-18 |
+| 臺北市傳統市(商)場、民有市場、攤販集中場 | 臺北市市場處 | 2026-03～2026-11 |
+| 新北市公有市場及超市清冊、公有攤販集中場 | 新北市市場處 | 2025-12、2026-08 |
+| 桃園市公有零售市場與市集名冊 | 桃園市政府經濟發展局 | 2025-06 開放資料；介紹頁與名冊 2026-11-10 擷取 |
+| 新竹市公有零售市場名冊 | 新竹市政府（[data.gov.tw/dataset/67539](https://data.gov.tw/dataset/67539)） | 2025-11-17 |
+| 傳統市場座標核對與補遺 | OpenStreetMap amenity=marketplace | 2026-11-08 |
 
 全家官方門市 API（api.map.com.tw）目前無法取得有效資料，故改用 OSM。OSM 門市覆蓋率可能低於實際家數。
 
@@ -24,4 +30,5 @@
 python3 scripts/fetch_stores.py   # 需先有村里界 shapefile
 python3 scripts/build_data.py
 python3 scripts/build_grid.py   # 點位預判器網格
+python3 scripts/build_markets.py  # 傳統市場（政府名單 + OSM 核對）
 ```

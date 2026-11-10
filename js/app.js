@@ -13,11 +13,24 @@
     age65: { label: "65歲以上占比", kind: "pct" },
     age2544: { label: "25–44歲占比", kind: "pct" },
     age014: { label: "0–14歲占比", kind: "pct" },
+    age45p: { label: "45歲以上占比", kind: "pct" },
+    age4564: { label: "45–64歲占比", kind: "pct" },
     pop: { label: "人口", kind: "int" },
     y1: { label: "近1年人口成長率", kind: "pctSigned" },
     y5: { label: "近5年人口成長率", kind: "pctSigned" },
     perCvs: { label: "每家超商服務人數", kind: "int" },
+    perMkt: { label: "每市場服務人數", kind: "int" },
+    mk: { label: "圈內市場數", kind: "int" },
+    nearMkt: { label: "距最近市場", kind: "meters" },
     resto: { label: "OSM 餐廳數", kind: "int" },
+  };
+  const MARKET_TYPES = {
+    "公有市場": { color: "#c2410c", short: "公" },
+    "民有市場": { color: "#d97706", short: "民" },
+    "攤販集中區": { color: "#0f766e", short: "攤" },
+    "臨時攤販集中場": { color: "#0369a1", short: "臨" },
+    "黃昏市場": { color: "#7c3aed", short: "黃" },
+    "早市": { color: "#db2777", short: "早" },
   };
 
   const state = {
@@ -41,12 +54,17 @@
     brandFilter: "all",
     showRestaurants: false,
     restaurants: [],
+    showMarkets: true,
+    markets: null,
+    marketMeta: null,
+    marketsLoading: null,
     gridCache: {},
     predict: {
       metric: "age65",
       desc: true,
       minPop: 3000,
       maxPop: null,
+      maxMk: null,
       scopeCounty: "taoyuan",
       scopeDistrict: "",
       radius: 500,
@@ -58,7 +76,7 @@
     },
   };
 
-  let map, circleLayer, villageLayer, districtLayer, storeLayer, restoLayer, compareLayer, predictLayer, heatLayer;
+  let map, circleLayer, villageLayer, districtLayer, storeLayer, restoLayer, marketLayer, compareLayer, predictLayer, heatLayer;
   let centerMarker;
   let searchTimer = null;
   let centerSeq = 0;
@@ -186,6 +204,52 @@
     return state.regionDistricts;
   }
 
+  async function ensureMarkets() {
+    if (state.markets) return state.markets;
+    if (!state.marketsLoading) {
+      state.marketsLoading = loadJSON("data/markets.json").then((d) => {
+        state.marketMeta = d;
+        state.markets = d.markets || [];
+        return state.markets;
+      }).catch(() => {
+        state.markets = [];
+        return state.markets;
+      });
+    }
+    return state.marketsLoading;
+  }
+
+  function marketColor(type) {
+    return MARKET_TYPES[type]?.color || "#c2410c";
+  }
+
+  function collectMarkets(lat, lng, radius) {
+    const all = state.markets || [];
+    let nearest = null;
+    const inside = [];
+    for (const m of all) {
+      const d = distM(lat, lng, m.lat, m.lng);
+      const rec = { ...m, dist: d };
+      if (!nearest || d < nearest.dist) nearest = rec;
+      if (d <= radius) inside.push(rec);
+    }
+    inside.sort((a, b) => a.dist - b.dist);
+    return { inside, nearest };
+  }
+
+  function attachMarketStats(stats, lat, lng, radius, pop) {
+    const { inside, nearest } = collectMarkets(lat, lng, radius);
+    stats.marketsIn = inside;
+    stats.marketCount = inside.length;
+    stats.nearestMarket = nearest;
+    stats.perMkt = inside.length ? pop / inside.length : null;
+    return stats;
+  }
+
+  function marketsForDistrict(d) {
+    return (state.markets || []).filter((m) => m.cid === d.cid && m.district === d.name);
+  }
+
   async function ensureSearch() {
     if (state.search) return state.search;
     if (!state.searchLoading) {
@@ -218,6 +282,7 @@
     circleLayer = L.layerGroup().addTo(map);
     storeLayer = L.layerGroup().addTo(map);
     restoLayer = L.layerGroup().addTo(map);
+    marketLayer = L.layerGroup().addTo(map);
     compareLayer = L.layerGroup().addTo(map);
     heatLayer = L.layerGroup().addTo(map);
     predictLayer = L.layerGroup().addTo(map);
@@ -251,7 +316,7 @@
   function syncSourceDetails() {
     const d = $("sourceDetails");
     if (!d) return;
-    d.open = !window.matchMedia("(max-width: 768px)").matches;
+    d.open = false;
   }
 
   function drawCircleOnly(lat, lng, radius) {
@@ -346,6 +411,7 @@
     storesIn.forEach((s) => { count[s.b] += 1; });
     const cvs = count.s711 + count.fami;
     const perCvs = cvs > 0 ? pop / cvs : null;
+    const mk = collectMarkets(lat, lng, radius);
 
     return {
       kind: "circle",
@@ -354,6 +420,10 @@
       ageShare: shares(age, pop),
       chY1, chY5,
       hits, feats, storesIn, nearest, count, cvs, perCvs,
+      marketsIn: mk.inside,
+      marketCount: mk.inside.length,
+      nearestMarket: mk.nearest,
+      perMkt: mk.inside.length ? pop / mk.inside.length : null,
       vill,
       homeCountyId: homeId,
       homeCountyName: home ? home.name : countyName(homeId),
@@ -399,6 +469,9 @@
     const chY1 = d.popY1 ? { abs: d.pop - d.popY1, pct: (100 * (d.pop - d.popY1)) / d.popY1 } : null;
     const chY5 = d.popY5 ? { abs: d.pop - d.popY5, pct: (100 * (d.pop - d.popY5)) / d.popY5 } : null;
     const avg = data?.countyAvg;
+    const districtMarkets = marketsForDistrict(d)
+      .map((m) => ({ ...m, dist: distM(d.center[1], d.center[0], m.lat, m.lng) }))
+      .sort((a, b) => a.dist - b.dist);
     return {
       kind: "district",
       district: d,
@@ -417,6 +490,10 @@
       feats: [],
       storesIn, nearest, count, cvs,
       perCvs: cvs > 0 ? d.pop / cvs : null,
+      marketsIn: districtMarkets,
+      marketCount: districtMarkets.length,
+      nearestMarket: districtMarkets[0] || null,
+      perMkt: districtMarkets.length ? d.pop / districtMarkets.length : null,
       vill: null,
       homeCountyId: d.cid,
       homeCountyName: d.county || countyName(d.cid),
@@ -437,7 +514,10 @@
       $("panelEmpty").textContent = "正在載入" + needed.map((c) => c.name).join("、") + "資料…";
       $("panelBody").hidden = true;
     }
-    await ensureCountiesForCircle(lat, lng, state.radius);
+    await Promise.all([
+      ensureCountiesForCircle(lat, lng, state.radius),
+      ensureMarkets(),
+    ]);
     if (seq !== centerSeq) return;
     const vill = findPlace(lat, lng);
     state.stats = estimateCircle(lat, lng, state.radius);
@@ -450,6 +530,7 @@
       drawCircleOnly(lat, lng, state.radius);
       villageLayer.clearLayers();
       storeLayer.clearLayers();
+      drawMarkets([]);
       return;
     }
     state.placeName = name || (vill ? vill.district + vill.name : "地圖選點");
@@ -475,6 +556,7 @@
     villageLayer.clearLayers();
     if (state.stats?.feats?.length) villageLayer.addData({ type: "FeatureCollection", features: state.stats.feats });
     drawStores(state.stats?.storesIn || []);
+    drawMarkets(state.stats?.marketsIn || []);
     drawCompareMarkers();
     if (!map.hasLayer(centerMarker)) centerMarker.addTo(map);
     syncOverlay();
@@ -502,6 +584,54 @@
     }
   }
 
+  function marketIcon(type, outside) {
+    const color = marketColor(type);
+    const short = MARKET_TYPES[type]?.short || "市";
+    return L.divIcon({
+      className: "",
+      html: `<span class="mkt-pin${outside ? " out" : ""}" style="background:${color}">${short}</span>`,
+      iconSize: [22, 22],
+      iconAnchor: [11, 18],
+    });
+  }
+
+  function drawMarkets(insideList) {
+    if (!marketLayer) return;
+    marketLayer.clearLayers();
+    const countEl = $("marketToggleCount");
+    const inside = insideList || state.stats?.marketsIn || [];
+    if (countEl) {
+      countEl.textContent = state.markets ? `（${inside.length}）` : "";
+    }
+    if (!state.showMarkets) return;
+    const all = state.markets || [];
+    if (!all.length) return;
+    const isCircle = state.mode === "circle";
+    const lat = state.center.lat, lng = state.center.lng;
+    const radius = state.stats?.kind === "circle" ? state.stats.radius : state.radius;
+    const reach = Math.max(radius + 800, radius * 2);
+    const insideIds = new Set(inside.map((m) => m.id));
+    for (const m of all) {
+      let dist = m.dist;
+      if (dist == null && isCircle) dist = distM(lat, lng, m.lat, m.lng);
+      if (isCircle && dist > reach) continue;
+      if (!isCircle && state.mode === "admin") {
+        const d = getDistrict(state.selectedDistrict);
+        // still show all markets; cheap at ~300 points
+      }
+      const outside = isCircle && !insideIds.has(m.id);
+      const marker = L.marker([m.lat, m.lng], { icon: marketIcon(m.type, outside), zIndexOffset: outside ? 200 : 280 });
+      const distTxt = dist != null ? `${Math.round(dist)} 公尺` : "";
+      marker.bindPopup(
+        `<strong>${m.name}</strong><br>${m.type}${m.hours ? "　" + m.hours : ""}` +
+        `${distTxt ? "<br>" + distTxt : ""}` +
+        `${m.address ? "<br>" + m.address : ""}` +
+        `${m.note ? "<br><span class='src-note'>" + m.note + "</span>" : ""}`
+      );
+      marker.addTo(marketLayer);
+    }
+  }
+
   function drawCompareMarkers() {
     compareLayer.clearLayers();
     state.compare.forEach((c, i) => {
@@ -521,6 +651,11 @@
     if (state.indicator === "age2544") return d.pop ? (100 * d.age[2]) / d.pop : 0;
     if (state.indicator === "age65") return d.pop ? (100 * d.age[4]) / d.pop : 0;
     if (state.indicator === "cvs") return (d.stores.s711 || 0) + (d.stores.fami || 0);
+    if (state.indicator === "markets") return marketsForDistrict(d).length;
+    if (state.indicator === "perMkt") {
+      const n = marketsForDistrict(d).length;
+      return n > 0 ? d.pop / n : null;
+    }
     return 0;
   }
 
@@ -546,19 +681,21 @@
     villageLayer.clearLayers();
     storeLayer.clearLayers();
     restoLayer.clearLayers();
+    if (state.mode === "admin") drawMarkets(state.stats?.marketsIn || []);
     heatLayer.clearLayers();
     predictLayer.clearLayers();
     if (map.hasLayer(centerMarker)) map.removeLayer(centerMarker);
     syncOverlay();
     const districts = visibleDistricts();
-    const vals = districts.map(indicatorValue);
+    const vals = districts.map(indicatorValue).filter((v) => v != null);
     const min = vals.length ? Math.min(...vals) : 0;
     const max = vals.length ? Math.max(...vals) : 1;
     districtLayer.clearLayers();
     districtLayer.options.style = (feat) => {
       const d = districts.find((x) => x.code === feat.properties.code);
-      const v = d ? indicatorValue(d) : min;
-      const t = max === min ? 0.5 : (v - min) / (max - min);
+      const raw = d ? indicatorValue(d) : min;
+      const v = raw == null ? min : raw;
+      const t = (raw == null) ? 0 : (max === min ? 0.5 : (v - min) / (max - min));
       const selected = state.selectedDistrict === feat.properties.code;
       return {
         color: selected ? "#1f1915" : "#ffffff",
@@ -576,7 +713,7 @@
       })),
     };
     districtLayer.addData(fc);
-    renderMetricLegend($("indicatorSelect").selectedOptions[0].textContent, min, max, state.indicator);
+    renderMetricLegend($("indicatorSelect").selectedOptions[0].textContent, min, max, state.indicator === "markets" || state.indicator === "perMkt" ? "int" : state.indicator);
     renderDistrictButtons();
     drawCompareMarkers();
     if (state.stats?.kind === "district" && state.stats.storesIn) {
@@ -591,7 +728,7 @@
       const a = min + ((max - min) * i) / steps;
       const b = min + ((max - min) * (i + 1)) / steps;
       let label;
-      if (kind === "cvs" || kind === "int" || kind === "resto") label = `${Math.round(a)}–${Math.round(b)}`;
+      if (kind === "cvs" || kind === "int" || kind === "resto" || kind === "markets" || kind === "perMkt") label = `${Math.round(a)}–${Math.round(b)}`;
       else if (kind === "density") label = `${fmtInt(a)}–${fmtInt(b)}`;
       else if (kind === "pctSigned") label = `${fmtPct(a)}–${fmtPct(b)}`;
       else label = `${a.toFixed(1)}–${b.toFixed(1)}%`;
@@ -655,6 +792,7 @@
     $("radiusBar").hidden = state.mode !== "circle";
     $("adminBar").hidden = state.mode !== "admin";
     $("restoToggleWrap").hidden = state.mode !== "circle";
+    if ($("marketToggleWrap")) $("marketToggleWrap").hidden = state.mode === "predict";
     if (state.mode === "admin") {
       $("mapHint").hidden = true;
     } else if (state.mode === "predict") {
@@ -727,6 +865,12 @@
       changeCell(s.chY1, "近1年人口變化"),
       changeCell(s.chY5, "近5年人口變化"),
       metric("每家超商服務人數", s.perCvs == null ? "圈內無超商" : fmtInt(s.perCvs), `超商 ${s.cvs} 家（7-ELEVEN + 全家）`, "wide"),
+      metric("傳統市場", String(s.marketCount || 0), s.kind === "circle" ? "步行圈內列管／對位市集" : "本區列管／對位市集"),
+      metric("每市場服務人數", s.perMkt == null ? "此範圍沒有傳統市場" : fmtInt(s.perMkt),
+        s.nearestMarket
+          ? `最近：${s.nearestMarket.name}　${Math.round(s.nearestMarket.dist)} 公尺`
+          : "",
+        "wide"),
     ].join("");
 
     $("btnCompare").disabled = state.compare.length >= 6;
@@ -734,6 +878,7 @@
 
     renderAge(s);
     renderBrands(s);
+    renderMarkets(s);
     renderRestaurants();
     showTab(state.tab);
   }
@@ -833,6 +978,30 @@
     });
   }
 
+  function renderMarkets(s) {
+    const box = $("marketSection");
+    if (!box || !s) return;
+    const list = (s.marketsIn || []);
+    const items = list.map((m) => {
+      const dist = m.dist != null ? `${Math.round(m.dist)} 公尺` : "";
+      return `<li><span class="dot" style="background:${marketColor(m.type)}"></span><strong>${m.name}</strong>　${m.type}${dist ? "　" + dist : ""}<br><span class="src-note">${m.address || ""}${m.hours ? "　" + m.hours : ""}</span></li>`;
+    }).join("");
+    const nearest = s.nearestMarket;
+    let nearTxt = "";
+    if (list.length === 0 && nearest) {
+      nearTxt = `<p class="src-note">此範圍沒有列管傳統市場。最近一處是「${nearest.name}」（${nearest.type}），約 ${Math.round(nearest.dist)} 公尺。</p>`;
+    }
+    const legend = Object.entries(MARKET_TYPES).map(([k, v]) =>
+      `<span><span class="dot" style="background:${v.color}"></span>${k}</span>`
+    ).join("");
+    box.innerHTML = `
+      <div class="market-legend">${legend}</div>
+      <p>此範圍有傳統市場 <strong>${list.length}</strong> 處${s.perMkt != null ? "；每市場約服務 " + fmtInt(s.perMkt) + " 人（戶籍人口估算）" : ""}。</p>
+      ${nearTxt}
+      <ul class="store-list">${items || "<li>此範圍沒有列管或對位到的傳統市場</li>"}</ul>
+      <p class="src-note">以政府公布的公有／民有市場、攤販集中區與黃昏市場為主，並以 OpenStreetMap marketplace 核對、補遺。夜市、超市與批發市場不列入。未經列管的巷口早市若未出現在名單或 OSM，地圖上不會顯示。</p>`;
+  }
+
   function renderRestaurants() {
     const box = $("restoSection");
     const tab = $("tabResto");
@@ -857,6 +1026,7 @@
     document.querySelectorAll(".tabs [data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
     $("ageSection").hidden = tab !== "age";
     $("brandSection").hidden = tab !== "brand";
+    $("marketSection").hidden = tab !== "market";
     $("restoSection").hidden = tab !== "resto";
   }
 
@@ -883,6 +1053,9 @@
       cvs: s.cvs,
       sbux: s.count.sbux || 0,
       mcd: s.count.mcd || 0,
+      marketCount: s.marketCount || 0,
+      perMkt: s.perMkt,
+      nearestMarket: s.nearestMarket ? `${s.nearestMarket.name} ${Math.round(s.nearestMarket.dist)}m` : "—",
     });
     renderCompare();
     drawCompareMarkers();
@@ -906,6 +1079,9 @@
       ${row("超商", (c) => c.cvs)}
       ${row("星巴克", (c) => c.sbux)}
       ${row("麥當勞", (c) => c.mcd)}
+      ${row("傳統市場", (c) => c.marketCount ?? 0)}
+      ${row("每市場服務人數", (c) => c.perMkt == null ? "無市場" : fmtInt(c.perMkt))}
+      ${row("最近市場", (c) => c.nearestMarket || "—")}
     </tbody>`;
     $("compareTable").querySelectorAll("[data-del]").forEach((b) => {
       b.addEventListener("click", () => {
@@ -996,7 +1172,7 @@
       $("panelEmpty").hidden = false;
       $("panelEmpty").textContent = "正在載入各行政區資料…";
       $("panelBody").hidden = true;
-      await ensureDistricts();
+      await Promise.all([ensureDistricts(), ensureMarkets()]);
       if (!state.selectedDistrict) {
         await ensureCountiesForCircle(state.center.lat, state.center.lng, 50);
         const here = findPlace(state.center.lat, state.center.lng);
@@ -1022,6 +1198,7 @@
       villageLayer.clearLayers();
       storeLayer.clearLayers();
       restoLayer.clearLayers();
+      if (marketLayer) marketLayer.clearLayers();
       if (map.hasLayer(centerMarker)) map.removeLayer(centerMarker);
       syncOverlay();
       if (state.predict.ran) {
@@ -1096,6 +1273,14 @@
     if (metric === "y5") return r.y5;
     if (metric === "perCvs") return r.perCvs;
     if (metric === "resto") return r.resto;
+    if (metric === "age45p") return (r.share[3] || 0) + (r.share[4] || 0);
+    if (metric === "age4564") return r.share[3];
+    if (metric === "mk") return r.mk;
+    if (metric === "perMkt") {
+      if (r.mk == null) return null;
+      return r.mk > 0 ? r.pop / r.mk : r.pop + 1e9;
+    }
+    if (metric === "nearMkt") return r.nearMkt;
     return null;
   }
 
@@ -1104,6 +1289,8 @@
     const kind = PREDICT_METRICS[metric]?.kind;
     if (kind === "pct") return v.toFixed(1) + "%";
     if (kind === "pctSigned") return fmtPct(v);
+    if (kind === "meters") return fmtInt(v) + " 公尺";
+    if (metric === "perMkt" && v >= 1e9) return "尚無市場";
     return fmtInt(v);
   }
 
@@ -1118,6 +1305,8 @@
     state.predict.radius = Number($("predictRadius").value);
     state.predict.topN = Number($("predictTopN").value);
     state.predict.showHeat = $("predictHeat").checked;
+    const maxMkRaw = $("predictMaxMk") ? $("predictMaxMk").value.trim() : "";
+    state.predict.maxMk = maxMkRaw === "" ? null : Number(maxMkRaw);
   }
 
   async function runPredict(ev) {
@@ -1131,14 +1320,15 @@
     $("predictResults").innerHTML = "";
     let cells = [];
     try {
-      const parts = await Promise.all(ids.map(ensureGrid));
-      cells = parts.flat();
+      const parts = await Promise.all([...ids.map(ensureGrid), ensureMarkets()]);
+      cells = parts.slice(0, ids.length).flat();
     } catch (err) {
       status.textContent = "載入失敗：" + err.message;
       return;
     }
     const radius = state.predict.radius;
     const metric = state.predict.metric;
+    const mkts = state.markets || [];
     const list = [];
     for (const c of cells) {
       if (state.predict.scopeDistrict && c.district !== state.predict.scopeDistrict) continue;
@@ -1146,6 +1336,16 @@
       if (!rec) continue;
       if (rec.pop < state.predict.minPop) continue;
       if (state.predict.maxPop != null && rec.pop > state.predict.maxPop) continue;
+      let mk = 0, near = Infinity;
+      for (const m of mkts) {
+        const d = distM(c.lat, c.lng, m.lat, m.lng);
+        if (d <= radius) mk += 1;
+        if (d < near) near = d;
+      }
+      rec.mk = mk;
+      rec.nearMkt = Number.isFinite(near) ? near : null;
+      rec.perMkt = mk > 0 ? rec.pop / mk : null;
+      if (state.predict.maxMk != null && mk > state.predict.maxMk) continue;
       const v = predictValue(c, radius, metric);
       if (v == null) continue;
       list.push(c);
@@ -1241,6 +1441,8 @@
           　人口 ${fmtInt(rec.pop)}　戶數 ${fmtInt(rec.hh)}
           　65歲以上 ${rec.share[4].toFixed(1)}%　25–44歲 ${rec.share[2].toFixed(1)}%
           　超商 ${rec.cvs}　每家超商 ${rec.perCvs == null ? "—" : fmtInt(rec.perCvs)} 人
+          　市場 ${rec.mk ?? "—"}　每市場 ${rec.mk ? fmtInt(rec.pop / rec.mk) : "尚無市場"} 人
+          ${rec.nearMkt != null ? "　最近市場 " + fmtInt(rec.nearMkt) + " 公尺" : ""}
           ${rec.resto ? "　OSM 餐廳 " + rec.resto : ""}
         </div>
       </li>`;
@@ -1331,13 +1533,17 @@
 
   function renderFooter() {
     const src = state.meta.sources || [];
-    const body = src.map((s) => {
+    let body = src.map((s) => {
       const dates = (s.dates || [s.date]).filter(Boolean).join("、");
       return `<div><strong>${s.name}</strong>　${s.org || ""}${dates ? "　" + dates : ""}${s.note ? "　" + s.note : ""}</div>`;
     }).join("") +
       `<div>${state.meta.method || ""}</div>
        <div>人口為戶籍登記數，非常住／實際居住人口。步行圈以村里多邊形與圓相交的面積比例估算，假設人口在村里內均勻分布。</div>
        <div>點位預判器的 OSM 餐廳數來自 OpenStreetMap 的 amenity=restaurant 節點，僅供參考。</div>`;
+    if (state.marketMeta) {
+      const n = state.marketMeta.count || (state.markets || []).length;
+      body += `<div><strong>傳統市場</strong>　經濟部商業發展署全國零售市場基本資料（<a href="https://data.gov.tw/dataset/59855">data.gov.tw 59855</a>，品管 2026-09-18）以及臺北市市場處、新北市市場處、桃園市政府經濟發展局、新竹市政府開放名單；座標以官方門牌地理編碼與 OpenStreetMap amenity=marketplace 核對、補遺（2026-11-10 建置，共 ${n} 處）。已排除夜市、超市／量販與批發市場。新北市民有攤集區等未公開名單、以及未經列管的巷口早市，不會出現在地圖上。</div>`;
+    }
     $("footer").innerHTML = `<details class="sources" id="sourceDetails"><summary>資料來源</summary><div class="source-body">${body}</div></details>`;
     syncSourceDetails();
   }
@@ -1400,6 +1606,12 @@
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", refreshMapSize);
     }
+    if ($("toggleMarkets")) {
+      $("toggleMarkets").addEventListener("change", (e) => {
+        state.showMarkets = e.target.checked;
+        drawMarkets(state.stats?.marketsIn || []);
+      });
+    }
     $("toggleRestaurants").addEventListener("change", (e) => {
       state.showRestaurants = e.target.checked;
       if (state.showRestaurants) {
@@ -1426,7 +1638,8 @@
       state.homeCountyId = dc.cid || "taoyuan";
     }
     renderFooter();
-    await ensureCounty(state.homeCountyId);
+    await Promise.all([ensureCounty(state.homeCountyId), ensureMarkets()]);
+    renderFooter();
     map.setView([state.center.lat, state.center.lng], 16);
     await setCenter(state.center.lat, state.center.lng, state.placeName);
     refreshMapSize();
@@ -1459,6 +1672,12 @@
         })),
         ageShare: s.ageShare,
         cvs: s.cvs,
+        marketCount: s.marketCount || 0,
+        perMkt: s.perMkt,
+        nearestMarket: s.nearestMarket ? { name: s.nearestMarket.name, type: s.nearestMarket.type, dist: s.nearestMarket.dist, address: s.nearestMarket.address } : null,
+        markets: (s.marketsIn || []).map((m) => ({
+          name: m.name, type: m.type, dist: m.dist, address: m.address, district: m.district,
+        })),
       };
     },
     predictResults: () => state.predict.results.map((c, i) => {
@@ -1477,6 +1696,9 @@
         cvs: rec.cvs,
         perCvs: rec.perCvs,
         resto: rec.resto,
+        mk: rec.mk,
+        perMkt: rec.perMkt,
+        nearMkt: rec.nearMkt,
         metric: state.predict.metric,
         value: predictValue(c, state.predict.radius, state.predict.metric),
       };
