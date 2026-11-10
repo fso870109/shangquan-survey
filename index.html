@@ -46,6 +46,7 @@
                 <option value="cvs">超商家數</option>
                 <option value="markets">市場數</option>
                 <option value="perMkt">每市場服務人數</option>
+                <option value="incMed">所得中位數</option>
               </select>
             </label>
             <label>縣市篩選（選填）
@@ -128,6 +129,7 @@
               <option value="nearMkt">距最近市場</option>
               <option value="age45p">45歲以上占比</option>
               <option value="age4564">45–64歲占比</option>
+              <option value="incMed">所得中位數最高</option>
               <option value="resto">OSM 餐廳數</option>
             </select>
           </label>
@@ -148,6 +150,14 @@
           <label>圈內市場數上限
             <input id="predictMaxMk" type="number" min="0" step="1" placeholder="不限，例如填 1 表示市場少" />
           </label>
+          <div class="predict-row">
+            <label>所得中位數下限（萬）
+              <input id="predictMinInc" type="number" min="0" step="1" placeholder="不限，例如 70" />
+            </label>
+            <label>所得中位數上限（萬）
+              <input id="predictMaxInc" type="number" min="0" step="1" placeholder="不限" />
+            </label>
+          </div>
           <label>範圍縣市
             <select id="predictCounty"></select>
           </label>

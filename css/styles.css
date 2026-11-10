@@ -270,6 +270,7 @@ button, input, select { font: inherit; }
   padding: 4px 0;
   border-bottom: 1px dashed var(--line);
 }
+.vill-list li span:last-child { text-align: right; color: var(--muted); }
 .tabs { display: flex; gap: 6px; margin: 8px 0 12px; }
 .tabs button {
   border: 0;

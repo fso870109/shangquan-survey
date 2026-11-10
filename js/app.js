@@ -22,6 +22,7 @@
     perMkt: { label: "每市場服務人數", kind: "int" },
     mk: { label: "圈內市場數", kind: "int" },
     nearMkt: { label: "距最近市場", kind: "meters" },
+    incMed: { label: "所得中位數", kind: "wan" },
     resto: { label: "OSM 餐廳數", kind: "int" },
   };
   const MARKET_TYPES = {
@@ -58,6 +59,8 @@
     markets: null,
     marketMeta: null,
     marketsLoading: null,
+    income: null,
+    incomeLoading: null,
     gridCache: {},
     predict: {
       metric: "age65",
@@ -65,6 +68,8 @@
       minPop: 3000,
       maxPop: null,
       maxMk: null,
+      minInc: null,
+      maxInc: null,
       scopeCounty: "taoyuan",
       scopeDistrict: "",
       radius: 500,
@@ -183,6 +188,7 @@
         const data = await loadJSON("data/" + id + ".json");
         data.villages.forEach((v) => { v.cid = id; v.county = data.name; });
         data.districts.forEach((d) => { d.cid = id; d.county = data.name; });
+        if (state.income) attachIncomeToData(data);
         state.cache[id] = data;
         return data;
       })();
@@ -217,6 +223,135 @@
       });
     }
     return state.marketsLoading;
+  }
+
+  async function ensureIncome() {
+    if (state.income) return state.income;
+    if (!state.incomeLoading) {
+      state.incomeLoading = loadJSON("data/income.json").then((d) => {
+        state.income = d;
+        Object.values(state.cache).forEach(attachIncomeToData);
+        return d;
+      }).catch(() => {
+        state.income = { villages: {}, districts: {}, counties: {}, join: {} };
+        return state.income;
+      });
+    }
+    return state.incomeLoading;
+  }
+
+  function attachIncomeToData(data) {
+    const inc = state.income;
+    if (!inc || !data) return;
+    const vill = inc.villages || {};
+    data.villages.forEach((v) => {
+      const rec = vill[v.id];
+      if (rec) v.inc = rec;
+    });
+    const dists = inc.districts || {};
+    data.districts.forEach((d) => {
+      const rec = dists[d.code];
+      if (rec) d.inc = rec;
+    });
+    const c = (inc.counties || {})[data.name];
+    if (c && data.countyAvg) {
+      data.countyAvg.incMed = c.medW;
+      data.countyAvg.incAvg = c.avgW;
+      data.countyAvg.incN = c.n;
+    }
+  }
+
+  function fmtWan(thousand) {
+    if (thousand == null || Number.isNaN(thousand)) return "—";
+    return (thousand / 10).toLocaleString("zh-Hant-TW", {
+      maximumFractionDigits: 1,
+      minimumFractionDigits: 1,
+    }) + " 萬";
+  }
+
+  function incomeWeighted(hits) {
+    let w = 0, med = 0, avg = 0, nHits = 0;
+    for (const h of hits) {
+      const rec = h.v.inc;
+      if (!rec || rec.n == null || rec.n <= 0 || rec.med == null) continue;
+      const wt = rec.n * h.ratio;
+      w += wt;
+      med += rec.med * wt;
+      avg += (rec.avg || 0) * wt;
+      nHits += 1;
+    }
+    if (!w) return null;
+    return { med: med / w, avg: avg / w, n: w, villages: nHits };
+  }
+
+  function districtIncome(d) {
+    if (!d) return null;
+    if (d.inc) return d.inc;
+    return (state.income && state.income.districts && state.income.districts[d.code]) || null;
+  }
+
+  function countyIncomeOf(name) {
+    return (state.income && state.income.counties && state.income.counties[name]) || null;
+  }
+
+  function circleCircleIntersectArea(r, R, d) {
+    if (d >= r + R) return 0;
+    if (d <= Math.abs(R - r)) {
+      const rl = Math.min(r, R);
+      return Math.PI * rl * rl;
+    }
+    const r2 = r * r, R2 = R * R;
+    const a = Math.acos(Math.min(1, Math.max(-1, (d * d + r2 - R2) / (2 * d * r)))) * 2;
+    const b = Math.acos(Math.min(1, Math.max(-1, (d * d + R2 - r2) / (2 * d * R)))) * 2;
+    return 0.5 * (r2 * (a - Math.sin(a)) + R2 * (b - Math.sin(b)));
+  }
+
+  function approxVillageShare(v, lat, lng, radiusM) {
+    const d = distM(lat, lng, v.center[1], v.center[0]);
+    const villR = Math.sqrt((v.area * 1e6) / Math.PI);
+    if (!(villR > 0)) return 0;
+    const inter = circleCircleIntersectArea(radiusM, villR, d);
+    return Math.min(1, inter / (v.area * 1e6));
+  }
+
+  function estimatePointIncome(lat, lng, radius) {
+    const cb = circleBBox(lat, lng, radius);
+    const hits = [];
+    for (const data of iterCounties()) {
+      for (const v of data.villages) {
+        if (!v.inc || !bboxOverlap(v.bbox, cb)) continue;
+        const ratio = approxVillageShare(v, lat, lng, radius);
+        if (ratio <= 0.002) continue;
+        hits.push({ v, ratio });
+      }
+    }
+    return incomeWeighted(hits);
+  }
+
+  function villIncomeNote(v) {
+    if (!v || !v.inc || v.inc.med == null) return "所得無資料";
+    let t = "中位數 " + fmtWan(v.inc.med);
+    if (v.inc.how === "inherit" && v.inc.from) t += `（112年原屬${v.inc.from}）`;
+    else if (v.inc.how === "merge" && v.inc.from) t += `（112年${v.inc.from}合併推估）`;
+    else if (v.inc.how === "split-joint" && v.inc.from) t += `（112年${v.inc.from}共同分里）`;
+    return t;
+  }
+
+  function incomeCompareNote(value, countyValue, countyName, kindLabel, scopeNote) {
+    if (value == null) return "此範圍缺少所得資料";
+    const bits = [];
+    if (countyValue != null && countyName) {
+      const diff = value - countyValue;
+      if (Math.abs(diff) < 0.05) {
+        bits.push(`與${countyName}各里加權平均相同（${fmtWan(countyValue)}）`);
+      } else {
+        const rel = diff > 0 ? "高出" : "低於";
+        bits.push(`較${countyName}各里加權平均（${fmtWan(countyValue)}）${rel} ${fmtWan(Math.abs(diff))}`);
+      }
+    }
+    if (scopeNote) bits.push(scopeNote);
+    bits.push("綜所稅申報、不含免稅所得、所得年 112");
+    return bits.join("。");
   }
 
   function marketColor(type) {
@@ -412,6 +547,9 @@
     const cvs = count.s711 + count.fami;
     const perCvs = cvs > 0 ? pop / cvs : null;
     const mk = collectMarkets(lat, lng, radius);
+    const inc = incomeWeighted(hits);
+    const homeName = home ? home.name : countyName(homeId);
+    const cInc = countyIncomeOf(homeName) || (avg && avg.incMed != null ? { medW: avg.incMed, avgW: avg.incAvg } : null);
 
     return {
       kind: "circle",
@@ -424,9 +562,14 @@
       marketCount: mk.inside.length,
       nearestMarket: mk.nearest,
       perMkt: mk.inside.length ? pop / mk.inside.length : null,
+      incMed: inc ? inc.med : null,
+      incAvg: inc ? inc.avg : null,
+      incN: inc ? inc.n : null,
+      countyIncMed: cInc ? cInc.medW : null,
+      countyIncAvg: cInc ? cInc.avgW : null,
       vill,
       homeCountyId: homeId,
-      homeCountyName: home ? home.name : countyName(homeId),
+      homeCountyName: homeName,
       countyAvg: avg,
     };
   }
@@ -472,6 +615,9 @@
     const districtMarkets = marketsForDistrict(d)
       .map((m) => ({ ...m, dist: distM(d.center[1], d.center[0], m.lat, m.lng) }))
       .sort((a, b) => a.dist - b.dist);
+    const dInc = districtIncome(d);
+    const homeName = d.county || countyName(d.cid);
+    const cInc = countyIncomeOf(homeName) || (avg && avg.incMed != null ? { medW: avg.incMed, avgW: avg.incAvg } : null);
     return {
       kind: "district",
       district: d,
@@ -494,9 +640,14 @@
       marketCount: districtMarkets.length,
       nearestMarket: districtMarkets[0] || null,
       perMkt: districtMarkets.length ? d.pop / districtMarkets.length : null,
+      incMed: dInc ? dInc.med : null,
+      incAvg: dInc ? dInc.avg : null,
+      incN: dInc ? dInc.n : null,
+      countyIncMed: cInc ? cInc.medW : null,
+      countyIncAvg: cInc ? cInc.avgW : null,
       vill: null,
       homeCountyId: d.cid,
-      homeCountyName: d.county || countyName(d.cid),
+      homeCountyName: homeName,
       countyAvg: avg,
     };
   }
@@ -517,6 +668,7 @@
     await Promise.all([
       ensureCountiesForCircle(lat, lng, state.radius),
       ensureMarkets(),
+      ensureIncome(),
     ]);
     if (seq !== centerSeq) return;
     const vill = findPlace(lat, lng);
@@ -656,6 +808,10 @@
       const n = marketsForDistrict(d).length;
       return n > 0 ? d.pop / n : null;
     }
+    if (state.indicator === "incMed") {
+      const rec = districtIncome(d);
+      return rec && rec.med != null ? rec.med / 10 : null;
+    }
     return 0;
   }
 
@@ -713,7 +869,10 @@
       })),
     };
     districtLayer.addData(fc);
-    renderMetricLegend($("indicatorSelect").selectedOptions[0].textContent, min, max, state.indicator === "markets" || state.indicator === "perMkt" ? "int" : state.indicator);
+    const legendKind = (state.indicator === "markets" || state.indicator === "perMkt")
+      ? "int"
+      : (state.indicator === "incMed" ? "wan" : state.indicator);
+    renderMetricLegend($("indicatorSelect").selectedOptions[0].textContent, min, max, legendKind);
     renderDistrictButtons();
     drawCompareMarkers();
     if (state.stats?.kind === "district" && state.stats.storesIn) {
@@ -731,6 +890,7 @@
       if (kind === "cvs" || kind === "int" || kind === "resto" || kind === "markets" || kind === "perMkt") label = `${Math.round(a)}–${Math.round(b)}`;
       else if (kind === "density") label = `${fmtInt(a)}–${fmtInt(b)}`;
       else if (kind === "pctSigned") label = `${fmtPct(a)}–${fmtPct(b)}`;
+      else if (kind === "wan") label = `${a.toFixed(1)}–${b.toFixed(1)} 萬`;
       else label = `${a.toFixed(1)}–${b.toFixed(1)}%`;
       return `<div class="row"><i style="background:${colorRamp((i + 0.5) / steps)}"></i>${label}</div>`;
     }).join("");
@@ -827,7 +987,7 @@
         const label = nCounty > 1
           ? `${h.v.county || ""}${h.v.district}${h.v.name}`
           : `${h.v.district}${h.v.name}`;
-        return `<li><span>${label}</span><span>覆蓋 ${(h.ratio * 100).toFixed(0)}%</span></li>`;
+        return `<li><span>${label}</span><span>覆蓋 ${(h.ratio * 100).toFixed(0)}%　${villIncomeNote(h.v)}</span></li>`;
       }).join("");
     } else {
       $("placeKicker").textContent = "行政區";
@@ -837,7 +997,7 @@
       $("villCount").textContent = `（${s.hits.length} 里）`;
       $("villList").innerHTML = s.hits
         .sort((a, b) => b.v.pop - a.v.pop)
-        .map((h) => `<li><span>${h.v.name}</span><span>${fmtInt(h.v.pop)} 人</span></li>`)
+        .map((h) => `<li><span>${h.v.name}</span><span>${fmtInt(h.v.pop)} 人　${villIncomeNote(h.v)}</span></li>`)
         .join("");
     }
 
@@ -871,6 +1031,20 @@
           ? `最近：${s.nearestMarket.name}　${Math.round(s.nearestMarket.dist)} 公尺`
           : "",
         "wide"),
+      metric("所得中位數", s.incMed == null ? "—" : fmtWan(s.incMed),
+        incomeCompareNote(
+          s.incMed, s.countyIncMed, county, "中位數",
+          s.kind === "circle"
+            ? "圈內各里中位數按納稅單位加權平均"
+            : "本區申報中位數（財政部村里表合計列）"
+        )),
+      metric("所得平均數", s.incAvg == null ? "—" : fmtWan(s.incAvg),
+        incomeCompareNote(
+          s.incAvg, s.countyIncAvg, county, "平均數",
+          s.kind === "circle"
+            ? "圈內各里平均數按納稅單位加權平均"
+            : "本區申報平均數（財政部村里表合計列）"
+        )),
     ].join("");
 
     $("btnCompare").disabled = state.compare.length >= 6;
@@ -1056,6 +1230,8 @@
       marketCount: s.marketCount || 0,
       perMkt: s.perMkt,
       nearestMarket: s.nearestMarket ? `${s.nearestMarket.name} ${Math.round(s.nearestMarket.dist)}m` : "—",
+      incMed: s.incMed,
+      incAvg: s.incAvg,
     });
     renderCompare();
     drawCompareMarkers();
@@ -1082,6 +1258,8 @@
       ${row("傳統市場", (c) => c.marketCount ?? 0)}
       ${row("每市場服務人數", (c) => c.perMkt == null ? "無市場" : fmtInt(c.perMkt))}
       ${row("最近市場", (c) => c.nearestMarket || "—")}
+      ${row("所得中位數", (c) => c.incMed == null ? "—" : fmtWan(c.incMed))}
+      ${row("所得平均數", (c) => c.incAvg == null ? "—" : fmtWan(c.incAvg))}
     </tbody>`;
     $("compareTable").querySelectorAll("[data-del]").forEach((b) => {
       b.addEventListener("click", () => {
@@ -1172,7 +1350,7 @@
       $("panelEmpty").hidden = false;
       $("panelEmpty").textContent = "正在載入各行政區資料…";
       $("panelBody").hidden = true;
-      await Promise.all([ensureDistricts(), ensureMarkets()]);
+      await Promise.all([ensureDistricts(), ensureMarkets(), ensureIncome()]);
       if (!state.selectedDistrict) {
         await ensureCountiesForCircle(state.center.lat, state.center.lng, 50);
         const here = findPlace(state.center.lat, state.center.lng);
@@ -1281,6 +1459,7 @@
       return r.mk > 0 ? r.pop / r.mk : r.pop + 1e9;
     }
     if (metric === "nearMkt") return r.nearMkt;
+    if (metric === "incMed") return r.incMed;
     return null;
   }
 
@@ -1291,6 +1470,7 @@
     if (kind === "pctSigned") return fmtPct(v);
     if (kind === "meters") return fmtInt(v) + " 公尺";
     if (metric === "perMkt" && v >= 1e9) return "尚無市場";
+    if (kind === "wan") return fmtWan(v);
     return fmtInt(v);
   }
 
@@ -1307,6 +1487,10 @@
     state.predict.showHeat = $("predictHeat").checked;
     const maxMkRaw = $("predictMaxMk") ? $("predictMaxMk").value.trim() : "";
     state.predict.maxMk = maxMkRaw === "" ? null : Number(maxMkRaw);
+    const minIncRaw = $("predictMinInc") ? $("predictMinInc").value.trim() : "";
+    const maxIncRaw = $("predictMaxInc") ? $("predictMaxInc").value.trim() : "";
+    state.predict.minInc = minIncRaw === "" ? null : Number(minIncRaw);
+    state.predict.maxInc = maxIncRaw === "" ? null : Number(maxIncRaw);
   }
 
   async function runPredict(ev) {
@@ -1320,7 +1504,12 @@
     $("predictResults").innerHTML = "";
     let cells = [];
     try {
-      const parts = await Promise.all([...ids.map(ensureGrid), ensureMarkets()]);
+      const parts = await Promise.all([
+        ...ids.map(ensureGrid),
+        ...ids.map(ensureCounty),
+        ensureMarkets(),
+        ensureIncome(),
+      ]);
       cells = parts.slice(0, ids.length).flat();
     } catch (err) {
       status.textContent = "載入失敗：" + err.message;
@@ -1345,7 +1534,12 @@
       rec.mk = mk;
       rec.nearMkt = Number.isFinite(near) ? near : null;
       rec.perMkt = mk > 0 ? rec.pop / mk : null;
+      const incEst = estimatePointIncome(c.lat, c.lng, radius);
+      rec.incMed = incEst ? incEst.med : null;
+      rec.incAvg = incEst ? incEst.avg : null;
       if (state.predict.maxMk != null && mk > state.predict.maxMk) continue;
+      if (state.predict.minInc != null && (rec.incMed == null || rec.incMed / 10 < state.predict.minInc)) continue;
+      if (state.predict.maxInc != null && (rec.incMed == null || rec.incMed / 10 > state.predict.maxInc)) continue;
       const v = predictValue(c, radius, metric);
       if (v == null) continue;
       list.push(c);
@@ -1368,7 +1562,13 @@
     const scopeLabel = state.predict.scopeDistrict
       ? (countyName(state.predict.scopeCounty) + state.predict.scopeDistrict)
       : (state.predict.scopeCounty ? countyName(state.predict.scopeCounty) : "北台灣五縣市");
-    status.textContent = `在 ${scopeLabel}、${radius}m、人口 ≥ ${fmtInt(state.predict.minPop)} 的格子中，依「${PREDICT_METRICS[metric].label}」列出前 ${picked.length} 名（已去除過近的點）。數字皆為戶籍人口估算。`;
+    const extras = [];
+    if (state.predict.maxPop != null) extras.push(`人口 ≤ ${fmtInt(state.predict.maxPop)}`);
+    if (state.predict.maxMk != null) extras.push(`市場數 ≤ ${state.predict.maxMk}`);
+    if (state.predict.minInc != null) extras.push(`所得中位數 ≥ ${state.predict.minInc} 萬`);
+    if (state.predict.maxInc != null) extras.push(`所得中位數 ≤ ${state.predict.maxInc} 萬`);
+    const extraTxt = extras.length ? "、" + extras.join("、") : "";
+    status.textContent = `在 ${scopeLabel}、${radius}m、人口 ≥ ${fmtInt(state.predict.minPop)}${extraTxt} 的格子中，依「${PREDICT_METRICS[metric].label}」列出前 ${picked.length} 名（已去除過近的點）。人口為戶籍估算；所得為綜合所得稅申報資料（不含免稅所得，所得年 112）各里中位數之納稅單位加權平均。`;
     drawPredictLayers();
     renderPredictList();
     if (picked.length) {
@@ -1443,6 +1643,7 @@
           　超商 ${rec.cvs}　每家超商 ${rec.perCvs == null ? "—" : fmtInt(rec.perCvs)} 人
           　市場 ${rec.mk ?? "—"}　每市場 ${rec.mk ? fmtInt(rec.pop / rec.mk) : "尚無市場"} 人
           ${rec.nearMkt != null ? "　最近市場 " + fmtInt(rec.nearMkt) + " 公尺" : ""}
+          ${rec.incMed != null ? "　所得中位數 " + fmtWan(rec.incMed) : ""}
           ${rec.resto ? "　OSM 餐廳 " + rec.resto : ""}
         </div>
       </li>`;
@@ -1544,6 +1745,12 @@
       const n = state.marketMeta.count || (state.markets || []).length;
       body += `<div><strong>傳統市場</strong>　經濟部商業發展署全國零售市場基本資料（<a href="https://data.gov.tw/dataset/59855">data.gov.tw 59855</a>，品管 2026-09-18）以及臺北市市場處、新北市市場處、桃園市政府經濟發展局、新竹市政府開放名單；座標以官方門牌地理編碼與 OpenStreetMap amenity=marketplace 核對、補遺（2026-11-10 建置，共 ${n} 處）。已排除夜市、超市／量販與批發市場。新北市民有攤集區等未公開名單、以及未經列管的巷口早市，不會出現在地圖上。</div>`;
     }
+    if (state.income && state.income.source) {
+      const j = state.income.join || {};
+      const matched = j.matched != null ? j.matched : "";
+      const polys = j.polygons != null ? j.polygons : "";
+      body += `<div><strong>村里綜合所得</strong>　財政部財政資訊中心「綜稅綜合所得總額各縣市鄉鎮村里統計分析表」112年度（所得年 2023；<a href="https://data.gov.tw/dataset/103066">data.gov.tw 103066</a>）。此為綜合所得稅申報資料，不含免稅所得、政府移轉支出與分離課稅所得；原表金額單位為千元，畫面改以萬元顯示。步行圈數字為圈內各里中位數／平均數按納稅單位（申報戶）加權平均，再與所在縣市同樣口徑比較；行政區中位數取各區合計列。114–115年新設里沿用分里前原里的 112 年統計（對上 ${matched}/${polys} 里）。</div>`;
+    }
     $("footer").innerHTML = `<details class="sources" id="sourceDetails"><summary>資料來源</summary><div class="source-body">${body}</div></details>`;
     syncSourceDetails();
   }
@@ -1638,7 +1845,7 @@
       state.homeCountyId = dc.cid || "taoyuan";
     }
     renderFooter();
-    await Promise.all([ensureCounty(state.homeCountyId), ensureMarkets()]);
+    await Promise.all([ensureCounty(state.homeCountyId), ensureMarkets(), ensureIncome()]);
     renderFooter();
     map.setView([state.center.lat, state.center.lng], 16);
     await setCenter(state.center.lat, state.center.lng, state.placeName);
@@ -1678,6 +1885,20 @@
         markets: (s.marketsIn || []).map((m) => ({
           name: m.name, type: m.type, dist: m.dist, address: m.address, district: m.district,
         })),
+        incMed: s.incMed,
+        incAvg: s.incAvg,
+        incN: s.incN,
+        countyIncMed: s.countyIncMed,
+        countyIncAvg: s.countyIncAvg,
+        hitIncome: (s.hits || []).map((h) => ({
+          name: `${h.v.county || ""}${h.v.district}${h.v.name}`,
+          ratio: Math.round(h.ratio * 1000) / 10,
+          incMed: h.v.inc ? h.v.inc.med : null,
+          incAvg: h.v.inc ? h.v.inc.avg : null,
+          incN: h.v.inc ? h.v.inc.n : null,
+          how: h.v.inc ? h.v.inc.how : null,
+          from: h.v.inc ? h.v.inc.from : null,
+        })),
       };
     },
     predictResults: () => state.predict.results.map((c, i) => {
@@ -1699,6 +1920,8 @@
         mk: rec.mk,
         perMkt: rec.perMkt,
         nearMkt: rec.nearMkt,
+        incMed: rec.incMed,
+        incAvg: rec.incAvg,
         metric: state.predict.metric,
         value: predictValue(c, state.predict.radius, state.predict.metric),
       };

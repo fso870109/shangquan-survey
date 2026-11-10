@@ -17,10 +17,13 @@
 | 桃園市公有零售市場與市集名冊 | 桃園市政府經濟發展局 | 2025-06 開放資料；介紹頁與名冊 2026-11-10 擷取 |
 | 新竹市公有零售市場名冊 | 新竹市政府（[data.gov.tw/dataset/67539](https://data.gov.tw/dataset/67539)） | 2025-11-17 |
 | 傳統市場座標核對與補遺 | OpenStreetMap amenity=marketplace | 2026-11-08 |
+| 綜稅綜合所得總額各縣市鄉鎮村里統計分析表 | 財政部財政資訊中心（[data.gov.tw/dataset/103066](https://data.gov.tw/dataset/103066)） | 112年度（所得年 2023） |
 
 全家官方門市 API（api.map.com.tw）目前無法取得有效資料，故改用 OSM。OSM 門市覆蓋率可能低於實際家數。
 
 人口為**戶籍人口**，非常住人口。步行圈人口以「圓與村里多邊形相交面積／村里面積 × 村里人口」估算；圓若跨縣市會加總所有相交村里，比較基準為中心點所在縣市平均。
+
+村里所得來自財政部綜合所得稅申報資料（不含免稅所得、政府移轉支出與分離課稅所得；金額原表為千元）。步行圈顯示各里中位數／平均數按納稅單位加權平均，並與所在縣市同樣口徑比較；行政區則採用各區合計列。114–115 年新設里沿用分里前原里的 112 年統計，納稅單位依現況戶數比例拆分。
 
 點位預判器以約 250 公尺間距網格預先計算 300／500／800m 步行圈估算（`scripts/build_grid.py`），上榜點會再以約一個半徑的距離去重。
 
@@ -31,4 +34,5 @@ python3 scripts/fetch_stores.py   # 需先有村里界 shapefile
 python3 scripts/build_data.py
 python3 scripts/build_grid.py   # 點位預判器網格
 python3 scripts/build_markets.py  # 傳統市場（政府名單 + OSM 核對）
+python3 scripts/build_income.py   # 村里綜合所得（財政部 112 年度表）
 ```
